@@ -4,7 +4,7 @@ services:
     container_name: mailcord-tunnel
     restart: always
     network_mode: host
-    command: tunnel --protocol http2 --url http://127.0.0.1:3006 run --token eyJhIjoiYjdhMmRiZjU1ZjEyYTEzYjA2YzFmN2E1MWRjNTkwNTkiLCJzIjoibUtURS9MR3k5VnlOczRRTkNXYlhhN0RWTWt5WXdqWDdQUWUwc1RKblF6ST0iLCJ0IjoiNWU1YWY1MTAtOGEyZS00NGFjLTgwN2EtNzM5MWQ2NmM5YWVjIn0=
+    command: tunnel --edge-ip-version 4 --protocol http2 --url http://127.0.0.1:3006 run --token eyJhIjoiYjdhMmRiZjU1ZjEyYTEzYjA2YzFmN2E1MWRjNTkwNTkiLCJzIjoibUtURS9MR3k5VnlOczRRTkNXYlhhN0RWTWt5WXdqWDdQUWUwc1RKblF6ST0iLCJ0IjoiNWU1YWY1MTAtOGEyZS00NGFjLTgwN2EtNzM5MWQ2NmM5YWVjIn0=
 
   postgres:
     image: postgres:15-alpine
