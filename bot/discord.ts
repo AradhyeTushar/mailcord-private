@@ -651,6 +651,47 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
+  // --- Simple Info Commands (ping, about, botinfo, invite) ---
+  if (commandName === 'ping') {
+    const sent = await interaction.deferReply({ fetchReply: true });
+    const latency = sent.createdTimestamp - interaction.createdTimestamp;
+    const embed = new EmbedBuilder()
+      .setColor('#2ECC71')
+      .setTitle(`${BOT_EMOJIS.BOLT} Pong!`)
+      .setDescription(`${BOT_EMOJIS.LATENCY} **Latency:** ${latency} ms\n${BOT_EMOJIS.VERIFY} **API:** Stable (${Math.round(client.ws.ping)} ms)\n🆔 **Process:** \`${PROCESS_ID}\`\n\nSystem operating at peak performance.`);
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  if (commandName === 'about') {
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle(`${BOT_EMOJIS.INFO} About NebulaMailCord Intelligence`)
+      .setDescription("> **NebulaMailCord** is an advanced alias virtualization engine driven by **Nebula-Core v2.5**.\n\n### 🧠 Intelligence Suite\n🔹 **Auto-Service Profiling**: Instant settings for Netflix, Discord, & more.\n🔹 **Bulk Identity Deployment**: Supreme-tier alias presets.\n🔹 **Conditional Encryption**: Smart privacy nodes with 'Click to Reveal' delivery.\n\n### ⚙️ System Specs\n📡 **Engine:** `Nebula-X`\n🛡️ **Security:** `AES-256 Content Masking`\n🏗️ **Matrix:** `User/Server Plan Intersection`\n\n---\n💡 Empowering privacy-first communication via intelligent routing.")
+      .setThumbnail(client.user?.displayAvatarURL() || null);
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (commandName === 'botinfo') {
+    const uptime = process.uptime();
+    const days = Math.floor(uptime / 86400);
+    const hours = Math.floor((uptime % 86400) / 3600);
+    const minutes = Math.floor((uptime % 3600) / 60);
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle(`${BOT_EMOJIS.STATS} System Statistics`)
+      .setDescription(`📦 **Version:** v2.5 (NebulaCore)\n🌐 **Servers:** ${client.guilds.cache.size}\n👥 **Users:** ${client.users.cache.size}\n⚡ **Uptime:** ${days}d ${hours}h ${minutes}m\n\nAll services are currently **ONLINE** and stable.`)
+      .setThumbnail(client.user?.displayAvatarURL() || null);
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (commandName === 'invite') {
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle(`${BOT_EMOJIS.LINK} Invite MailCord`)
+      .setDescription(`Add MailCord to your server and start managing aliases instantly.\n\n👉 [Click here to invite](https://discord.com/api/oauth2/authorize?client_id=${client.user?.id}&permissions=8&scope=bot%20applications.commands)\n\n💡 Requires Admin permissions for initial setup.`);
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
   if (commandName === 'setup') {
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: '❌ Only administrators can use this command.', ephemeral: true });
