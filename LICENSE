@@ -1,0 +1,57 @@
+PROPRIETARY AND CONFIDENTIAL SOURCE-AVAILABLE LICENSE
+
+Copyright (c) 2026 Tushar Aradhye (@AradhyeTushar). All Rights Reserved.
+
+==============================================================================
+IMPORTANT NOTICE - PLEASE READ CAREFULLY:
+This software, documentation, source code, design systems, algorithms, and
+associated assets ("Software") are proprietary, confidential, and the exclusive
+intellectual property of Tushar Aradhye.
+==============================================================================
+
+1. GRANT OF LICENSE
+Subject to the strict limitations herein, the Copyright Holder grants you a
+personal, limited, non-exclusive, non-transferable, and revocable license to
+inspect and evaluate the Software solely for private, non-commercial testing.
+
+2. STRICT PROHIBITIONS & RESTRICTIONS
+You may NOT under any circumstances:
+  a. COMMERCIAL USE: Sell, resell, rent, lease, sublicense, distribute, monetize,
+     or offer the Software as a paid service, Software-as-a-Service (SaaS),
+     managed service, or email forwarding service.
+  b. PUBLIC HOSTING: Host, deploy, or operate instances of the Software for
+     public consumption, commercial clients, or third parties without an explicit,
+     signed commercial license agreement from the Copyright Holder.
+  c. MODIFICATION & DERIVATIVES: Create derivative works, forks, clones, or
+     re-branded distributions of this Software or its architecture for public
+     or commercial release.
+  d. REDISTRIBUTION: Re-distribute, mirror, publish, or share any part of the
+     source code, backend modules, or binaries on GitHub, GitLab, Docker Hub,
+     or any public/private distribution network without prior written consent.
+  e. REVERSE ENGINEERING: Decompile, disassemble, reverse-engineer, or attempt
+     to derive underlying proprietary routing mechanisms, bot integrations,
+     or billing security models.
+  f. TRADEMARK & BRANDING: Use the names "MailCord", "Nebula", logos, emblems,
+     or visual designs associated with the Copyright Holder.
+
+3. COPYRIGHT & INTELLECTUAL PROPERTY
+The Software is protected by copyright laws and international treaties, including
+the Berne Convention. All rights not expressly granted herein are reserved
+exclusively by Tushar Aradhye.
+
+4. TERMINATION
+This license terminates automatically without notice if you breach any of its
+terms. Upon termination, you must destroy all copies of the Software in your
+possession or control.
+
+5. LEGAL ENFORCEMENT
+Any unauthorized use, copying, reproduction, or distribution constitutes willful
+copyright infringement and intellectual property theft, subject to statutory
+damages, injunctive relief, and legal prosecution to the fullest extent of the law.
+
+6. DISCLAIMER OF WARRANTIES
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY DAMAGES ARISING FROM THE USE OF
+OR INABILITY TO USE THIS SOFTWARE.

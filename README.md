@@ -8,7 +8,7 @@
 [![React 19](https://img.shields.io/badge/React-19.0-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
 [![Discord.js](https://img.shields.io/badge/Discord.js-v14-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.js.org)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](LICENSE)
 
 <p align="center">
   <b>Seamlessly bridge the gap between email and Discord.</b><br />
@@ -185,6 +185,11 @@ npm run start
 
 ---
 
-## 📄 License
-This project is proprietary and confidential. Licensed under the MIT License for authorized deployment.  
-Maintained by [AradhyeTushar](https://github.com/AradhyeTushar).
+## 📄 License & Intellectual Property
+
+Copyright © 2026 Tushar Aradhye ([@AradhyeTushar](https://github.com/AradhyeTushar)). **All Rights Reserved.**
+
+This software, source code, and documentation are **Strictly Proprietary and Confidential**.  
+Unauthorized copying, modification, reverse-engineering, redistribution, public hosting, or commercial exploitation in any format is strictly prohibited without prior explicit written authorization from the copyright holder.
+
+For complete terms and conditions, refer to the [LICENSE](LICENSE) file.
