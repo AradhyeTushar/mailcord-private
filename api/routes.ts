@@ -127,6 +127,8 @@ export const apiRouter = express.Router();
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
     try {
       const user: any = jwt.verify(token, JWT_SECRET);
+      // Always sync the plan so a freshly purchased subscription is reflected immediately
+      await syncUserPlan(user.id).catch(() => {});
       const userRecord: any = await User.findOne({ discordId: user.id }).lean();
       res.json({ 
         ...user, 

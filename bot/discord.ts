@@ -842,13 +842,13 @@ client.on('interactionCreate', async interaction => {
       }
 
       await interaction.deferReply({ ephemeral: true });
-      const guildRecord: any = interaction.guildId ? await Guild.findOne({ guildId: interaction.guildId }).lean() : null;
+      let guildRecord: any = interaction.guildId ? await Guild.findOne({ guildId: interaction.guildId }).lean() : null;
+      // Auto-setup: if the guild exists but hasn't been set up, complete setup automatically
       if (interaction.guildId && (!guildRecord || !guildRecord.setupCompleted)) {
-        return interaction.editReply({ 
-          content: `${BOT_EMOJIS.WARNING} **Bot Not Setup:** Alias creation is blocked in this server until an administrator runs \`/setup\`.` 
-        });
+        await Guild.updateOne({ guildId: interaction.guildId }, { $set: { setupCompleted: true } }, { upsert: true });
+        guildRecord = await Guild.findOne({ guildId: interaction.guildId }).lean();
       }
-      const limits = getEffectiveLimits(userRecord.plan, guildRecord.plan);
+      const limits = getEffectiveLimits(userRecord.plan, guildRecord?.plan || 'free');
 
       // Rate limit check
       if (!checkCreationRateLimit(user.id)) {
@@ -2023,8 +2023,10 @@ client.on('messageCreate', async message => {
             return reply(`${BOT_EMOJIS.WARNING} **First-time Setup Required**\nYou must set a recovery email and phone number.`, '#F1C40F', [row]);
           }
 
+          // Auto-setup: complete guild setup automatically if not done yet
           if (message.guildId && !guildRecord.setupCompleted) {
-            return reply(`${BOT_EMOJIS.WARNING} **Bot Not Setup:** Alias creation is blocked until an administrator runs \`!setup\` or \`/setup\`.`);
+            await Guild.updateOne({ guildId: message.guildId }, { $set: { setupCompleted: true } }, { upsert: true });
+            guildRecord = { ...guildRecord, setupCompleted: true };
           }
 
           if (!checkCreationRateLimit(user.id)) {
