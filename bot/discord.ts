@@ -21,6 +21,24 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const BUILD_TIME = "2026-04-19 07:30 UTC (NEBULA-X-V3)";
 const PROCESS_ID = Math.random().toString(36).substring(2, 8).toUpperCase();
 
+// Cache categoryId -> { discordId, expiry } to avoid a DB hit on every message
+const categoryOwnerCache = new Map<string, { discordId: string; expiry: number } | null>();
+const CATEGORY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+async function getCategoryOwner(categoryId: string): Promise<{ discordId: string } | null> {
+  const cached = categoryOwnerCache.get(categoryId);
+  if (cached !== undefined) {
+    if (cached === null || cached.expiry > Date.now()) return cached;
+    categoryOwnerCache.delete(categoryId);
+  }
+  const user: any = await User.findOne(
+    { [`guilds.${categoryId}`]: { $exists: true } },
+    { discordId: 1 }
+  ).lean().catch(() => null);
+  const result = user ? { discordId: user.discordId } : null;
+  categoryOwnerCache.set(categoryId, result ? { discordId: result.discordId, expiry: Date.now() + CATEGORY_CACHE_TTL } : null);
+  return result;
+}
+
 // --- Discord Bot Setup ---
 const client = new Client({ 
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -1248,16 +1266,12 @@ client.on('messageCreate', async message => {
   // 2. Strict Privacy Lockdown
   // If this channel is part of someone's private workspace, only allow the owner to speak.
   if (message.channel.parentId) {
-    const userWithThisCategory: any = await User.findOne({ [`guilds.${message.guildId}.categoryId`]: message.channel.parentId }).lean();
+    const userWithThisCategory = await getCategoryOwner(message.channel.parentId);
     if (userWithThisCategory) {
        const authorId = message.author.id.toString();
        const ownerId = userWithThisCategory.discordId.toString();
        
-       console.log(`[PRIVACY] [${BUILD_TIME}] Checking access for ${message.author.tag} (${authorId}) in category ${message.channel.parentId}. Owner: ${ownerId}`);
-       
        if (authorId !== ownerId) {
-          // Even administrators are blocked from triggering bot commands/replies in a user's private hub.
-          console.log(`[PRIVACY] Access Denied: ${authorId} !== ${ownerId}`);
           await reply(`❌ **Access Denied:** You are not the owner of this workspace. This is the private area of <@${userWithThisCategory.discordId}>.`, '#E74C3C', [], 15);
           return;
        }
