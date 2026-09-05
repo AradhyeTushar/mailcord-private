@@ -2,7 +2,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const DISCORD_APP_ID = process.env.DISCORD_CLIENT_ID || '1489402992393453678';
-export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
+export const DISCORD_BOT_TOKEN =
+  process.env.DISCORD_BOT_TOKEN ||
+  (process.env.DISCORD_BOT_TOKEN_P1 && process.env.DISCORD_BOT_TOKEN_P2 && process.env.DISCORD_BOT_TOKEN_P3
+    ? `${process.env.DISCORD_BOT_TOKEN_P1}.${process.env.DISCORD_BOT_TOKEN_P2}.${process.env.DISCORD_BOT_TOKEN_P3}`
+    : '');
 export const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 export const JWT_SECRET = process.env.JWT_SECRET || 'c3f5a8b9d2e1467c8a0b9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8';
 
