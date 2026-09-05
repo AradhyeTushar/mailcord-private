@@ -5,22 +5,25 @@ import fs from 'fs';
 
 const isLite = !process.env.MONGODB_URI || process.env.MONGODB_URI === '';
 
+let isMongooseConnected = false;
+
 export async function connectDB() {
+  const dataDir = path.join(process.cwd(), 'data', 'db');
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
   if (isLite) {
-    console.log('Running in LITE mode (NeDB). No MongoDB required.');
-    const dataDir = path.join(process.cwd(), 'data', 'db');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    console.log('[DB] Running in LITE mode (NeDB). No MongoDB required.');
     return;
   }
   
   try {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/mailcord';
-    await mongoose.connect(mongoUri);
-    console.log(`Connected to MongoDB at ${mongoUri}`);
+    await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 3000 });
+    isMongooseConnected = true;
+    console.log(`[DB] Connected to MongoDB at ${mongoUri}`);
   } catch (err) {
-    console.error('Failed to connect to MongoDB. Switching to LITE mode (NeDB)...');
-    // We can't easily switch types at runtime for the exported constants, 
-    // but we can at least log the failure.
+    console.warn('[DB] Could not connect to MongoDB. Gracefully falling back to local LITE mode (NeDB).');
+    isMongooseConnected = false;
   }
 }
 
@@ -136,25 +139,46 @@ const domainSchema = new mongoose.Schema({
   createdAt: { type: Date, default: () => new Date() }
 });
 
+function getModel(name: string, schema: any) {
+  const lite = createLiteModel(name);
+  if (isLite) return lite;
+
+  let mModel: any = null;
+  try {
+    mModel = mongoose.models[name] || mongoose.model(name, schema);
+  } catch (e) {
+    return lite;
+  }
+
+  return new Proxy({}, {
+    get(_, prop) {
+      if (isMongooseConnected && mongoose.connection.readyState === 1) {
+        return mModel[prop];
+      }
+      return (lite as any)[prop];
+    }
+  });
+}
+
 // --- Exports ---
-export const Alias: any = isLite ? createLiteModel('Alias') : mongoose.model('Alias', aliasSchema);
-export const User: any = isLite ? createLiteModel('User') : mongoose.model('User', userSchema);
-export const Guild: any = isLite ? createLiteModel('Guild') : mongoose.model('Guild', guildSchema);
-export const Email: any = isLite ? createLiteModel('Email') : mongoose.model('Email', emailSchema);
-export const Subscription: any = isLite ? createLiteModel('Subscription') : mongoose.model('Subscription', subscriptionSchema);
-export const Domain: any = isLite ? createLiteModel('Domain') : mongoose.model('Domain', domainSchema);
+export const Alias: any = getModel('Alias', aliasSchema);
+export const User: any = getModel('User', userSchema);
+export const Guild: any = getModel('Guild', guildSchema);
+export const Email: any = getModel('Email', emailSchema);
+export const Subscription: any = getModel('Subscription', subscriptionSchema);
+export const Domain: any = getModel('Domain', domainSchema);
 
 
 // --- Missing Models ported from NebulaMailCord ---
 
 const mailthreadSchema = new mongoose.Schema({}, { strict: false });
-export const MailThread: any = isLite ? createLiteModel('MailThread') : mongoose.model('MailThread', mailthreadSchema);
+export const MailThread: any = getModel('MailThread', mailthreadSchema);
 
 const mailblockSchema = new mongoose.Schema({}, { strict: false });
-export const MailBlock: any = isLite ? createLiteModel('MailBlock') : mongoose.model('MailBlock', mailblockSchema);
+export const MailBlock: any = getModel('MailBlock', mailblockSchema);
 
 const destinationSchema = new mongoose.Schema({}, { strict: false });
-export const Destination: any = isLite ? createLiteModel('Destination') : mongoose.model('Destination', destinationSchema);
+export const Destination: any = getModel('Destination', destinationSchema);
 
 const upgradekeySchema = new mongoose.Schema({}, { strict: false });
-export const UpgradeKey: any = isLite ? createLiteModel('UpgradeKey') : mongoose.model('UpgradeKey', upgradekeySchema);
+export const UpgradeKey: any = getModel('UpgradeKey', upgradekeySchema);

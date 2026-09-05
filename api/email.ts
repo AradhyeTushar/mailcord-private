@@ -14,7 +14,7 @@ import { client } from '../bot/discord.js';
 import { REDIS_URI } from '../src/config.js';
 import { splitEmailBody } from '../src/lib/emailUtils.js';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 export const emailRouter = express.Router();
 
 const redisConnection = REDIS_URI ? new Redis(REDIS_URI, { 
@@ -56,6 +56,9 @@ function detectOTP(text: string): string | null {
 }
 
 async function analyzeEmail(subject: string, body: string) {
+  if (!ai) {
+    return { spamScore: 0, category: 'Other', summary: 'AI summary disabled (GEMINI_API_KEY not configured).' };
+  }
   try {
     const prompt = `Analyze the following email and provide a JSON response with the following fields:
     - spamScore: A number from 0 to 100 indicating how likely this is spam (100 = definitely spam).
@@ -237,23 +240,30 @@ emailRouter.post('/incoming-email', express.json({ limit: '50mb' }), async (req,
 let emailQueue: any = null;
 let emailWorker: any = null;
 
-if (useQueue) {
-  emailQueue = new Queue('incoming-emails', { 
-    connection: redisConnection,
-    defaultJobOptions: { removeOnComplete: true, removeOnFail: true }
-  });
+if (useQueue && redisConnection) {
+  try {
+    emailQueue = new Queue('incoming-emails', { 
+      connection: redisConnection,
+      defaultJobOptions: { removeOnComplete: true, removeOnFail: true }
+    });
+    emailQueue.on('error', () => {});
 
-  emailWorker = new Worker('incoming-emails', async job => {
-    await processEmailPipeline(job.data);
-  }, { connection: redisConnection } as any);
+    emailWorker = new Worker('incoming-emails', async job => {
+      await processEmailPipeline(job.data);
+    }, { connection: redisConnection } as any);
+    emailWorker.on('error', () => {});
 
-  emailWorker.on('completed', job => {
-    console.log(`[Worker] Job ${job.id} has completed!`);
-  });
+    emailWorker.on('completed', job => {
+      console.log(`[Worker] Job ${job.id} has completed!`);
+    });
 
-  emailWorker.on('failed', (job, err) => {
-    console.log(`[Worker] Job ${job?.id} failed: ${err.message}`);
-  });
+    emailWorker.on('failed', (job, err) => {
+      console.log(`[Worker] Job ${job?.id} failed: ${err.message}`);
+    });
+  } catch (err) {
+    console.warn('[Queue] Failed to initialize BullMQ, running directly.');
+    useQueue = false;
+  }
 }
 
 // ... (Rest of the file logic remains same)

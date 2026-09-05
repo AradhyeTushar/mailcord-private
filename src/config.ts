@@ -15,7 +15,7 @@ export const CF_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID || 'b7a2dbf55f12a
 export const CF_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID || 'ece18603c8c28e1cbfa19222167df87f';
 export const CF_DOMAIN = process.env.CLOUDFLARE_DOMAIN || 'bot.devtushar.uk';
 
-export const REDIS_URI = process.env.REDIS_URI || 'redis://127.0.0.1:6379';
+export const REDIS_URI = process.env.REDIS_URI || '';
 
 export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 export const PREFIX = '!';
