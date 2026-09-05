@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mailcord-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=mailcord_billing
+    ports:
+      - '5433:5432'
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:6
+    container_name: mailcord-mongodb
+    restart: always
+    ports:
+      - '27018:27017'
+    volumes:
+      - ./data/mongodb:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: mailcord-redis
+    restart: always
+    ports:
+      - '6380:6379'
+    volumes:
+      - ./data/redis:/data
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  redis_data:

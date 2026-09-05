@@ -1,0 +1,5 @@
+{
+  "name": "MailCord",
+  "description": "A Discord bot and web dashboard for managing private email aliases on a custom domain using Cloudflare Email Routing.",
+  "requestFramePermissions": []
+}
