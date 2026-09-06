@@ -901,11 +901,14 @@ client.on('interactionCreate', async interaction => {
 
     // Global Lockdown handles cross-user privacy. 
     // Here we ensure the owner is in the correct Hub channel.
-    if (userGuildData?.managementChannelId && interaction.channelId !== userGuildData.managementChannelId) {
-       return interaction.reply({ 
+    if (userGuildData?.managementChannelId) {
+      const channelExists = interaction.guild?.channels.cache.has(userGuildData.managementChannelId);
+      if (channelExists && interaction.channelId !== userGuildData.managementChannelId) {
+        return interaction.reply({ 
           content: `${BOT_EMOJIS.WARNING} **Security Restriction:** Management is restricted to your private control center: <#${userGuildData.managementChannelId}>`, 
           ephemeral: true 
-       });
+        });
+      }
     }
 
     const sub = options.getSubcommand();
@@ -1546,19 +1549,17 @@ client.on('messageCreate', async message => {
 
   // --- Management Command Gateway ---
   const MANAGEMENT_COMMANDS = ['user', 'alias', 'reset', 'filter', 'notify', 'inbox'];
-  if (MANAGEMENT_COMMANDS.includes(command!)) {
+  if (MANAGEMENT_COMMANDS.includes(command!) && message.guild) {
     const userRecord: any = await User.findOne({ discordId: message.author.id }).lean() || {};
     const userGuildData = userRecord.guilds?.[message.guild.id];
     const mgmtChannelId = userGuildData?.managementChannelId;
 
-    // 1. Force use of Private Hub
-    if (mgmtChannelId && message.channel.id !== mgmtChannelId) {
-       return reply(`${BOT_EMOJIS.WARNING} **Security Restriction:** Management commands are restricted to your private control center: <#${mgmtChannelId}>\n🆔 **Process:** \`${PROCESS_ID}\``, '#E74C3C', [], 15);
-    }
-
-    // 2. Setup Redirection
-    if (!mgmtChannelId && (command !== 'inbox' || (args[0] !== 'create' && args[0] !== 'setup'))) {
-       return reply(`${BOT_EMOJIS.INFO} **Account Setup Required:** You need to initialize your private workspace hub first. \n\n> Use \`${PREFIX}inbox create\` to get started.\n🆔 **Process:** \`${PROCESS_ID}\``, '#3498DB', [], 20);
+    if (mgmtChannelId) {
+      const channelExists = message.guild.channels.cache.has(mgmtChannelId);
+      // 1. Force use of Private Hub only if channel actually exists
+      if (channelExists && message.channel.id !== mgmtChannelId) {
+        return reply(`${BOT_EMOJIS.WARNING} **Security Restriction:** Management commands are restricted to your private control center: <#${mgmtChannelId}>\n🆔 **Process:** \`${PROCESS_ID}\``, '#E74C3C', [], 15);
+      }
     }
   }
 
