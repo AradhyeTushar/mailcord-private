@@ -393,13 +393,125 @@ const commands = [
   },
   {
     name: 'redeem',
-    description: '✨ Redeem an upgrade license code to elevate your account or server',
+    description: '✨ Redeem an upgrade license code to elevate your account, server, or another user',
     options: [
       {
         name: 'code',
         description: 'The upgrade key code (e.g. NEBULA-PXXXX-XXXX)',
         type: 3,
         required: true
+      },
+      {
+        name: 'user',
+        description: 'Target user to redeem this key for (Admin / Developer Only)',
+        type: 6,
+        required: false
+      }
+    ]
+  },
+  {
+    name: 'dev',
+    description: '🛠️ Developer management suite for users, servers, and keys (Developer Only)',
+    options: [
+      {
+        name: 'setplan',
+        description: 'Directly set a user\'s subscription tier',
+        type: 1,
+        options: [
+          { name: 'user', description: 'Target user to modify', type: 6, required: true },
+          {
+            name: 'plan',
+            description: 'Plan tier',
+            type: 3,
+            required: true,
+            choices: [
+              { name: 'Free Tier', value: 'free' },
+              { name: 'Premium Tier (Power User)', value: 'premium' },
+              { name: 'Supreme Tier (Pro Identity)', value: 'supreme' }
+            ]
+          },
+          { name: 'days', description: 'Duration in days (default: 30)', type: 4, required: false }
+        ]
+      },
+      {
+        name: 'setserver',
+        description: 'Directly set a server\'s subscription tier',
+        type: 1,
+        options: [
+          {
+            name: 'plan',
+            description: 'Server plan tier',
+            type: 3,
+            required: true,
+            choices: [
+              { name: 'Free Server', value: 'free' },
+              { name: 'Pro Server', value: 'pro' },
+              { name: 'Enterprise Server', value: 'enterprise' }
+            ]
+          },
+          { name: 'guild_id', description: 'Guild ID (leave empty for current server)', type: 3, required: false },
+          { name: 'days', description: 'Duration in days (default: 30)', type: 4, required: false }
+        ]
+      },
+      {
+        name: 'userinfo',
+        description: 'View database telemetry and quota details for a user',
+        type: 1,
+        options: [
+          { name: 'user', description: 'Target user to inspect', type: 6, required: true }
+        ]
+      },
+      {
+        name: 'resetuser',
+        description: 'Reset a user back to Free tier',
+        type: 1,
+        options: [
+          { name: 'user', description: 'Target user to reset', type: 6, required: true }
+        ]
+      },
+      {
+        name: 'genkey',
+        description: 'Generate a new redeemable license key',
+        type: 1,
+        options: [
+          {
+            name: 'plan',
+            description: 'Plan tier',
+            type: 3,
+            required: true,
+            choices: [
+              { name: 'Premium (Personal Power User)', value: 'premium' },
+              { name: 'Supreme (Pro Identity)', value: 'supreme' },
+              { name: 'Enterprise (Server-Wide)', value: 'enterprise' }
+            ]
+          },
+          { name: 'duration', description: 'Duration in days (default: 30)', type: 4, required: false }
+        ]
+      },
+      {
+        name: 'listkeys',
+        description: 'List recent license keys',
+        type: 1,
+        options: [
+          {
+            name: 'status',
+            description: 'Filter by key status',
+            type: 3,
+            required: false,
+            choices: [
+              { name: 'Unused Keys Only', value: 'unused' },
+              { name: 'All Recent Keys', value: 'all' }
+            ]
+          }
+        ]
+      },
+      {
+        name: 'deletekey',
+        description: 'Revoke / delete an unused license key',
+        type: 1,
+        options: [
+          { name: 'code', description: 'The key code to delete', type: 3, required: true }
+        ]
       }
     ]
   }
@@ -1251,6 +1363,20 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'redeem') {
     const code = options.getString('code', true).trim().toUpperCase();
+    const targetUser = options.getUser('user');
+
+    // If targetUser is specified and not self, enforce developer or server admin permissions
+    if (targetUser && targetUser.id !== user.id) {
+      const isDev = isDeveloper(user.id);
+      const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) || interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+      if (!isDev && !isGuildAdmin) {
+        return interaction.reply({
+          content: `${BOT_EMOJIS.WARNING} **Access Denied:** Only developers or server administrators can redeem license keys for other users.`,
+          ephemeral: true
+        });
+      }
+    }
+
     const key = await UpgradeKey.findOne({ code, used: { $ne: true } }).lean();
     if (!key) {
       return interaction.reply({
@@ -1260,7 +1386,8 @@ client.on('interactionCreate', async interaction => {
     }
 
     const now = Date.now();
-    const expiresAt = new Date(now + ((key.durationDays || 30) * 24 * 60 * 60 * 1000));
+    const durationDays = key.durationDays || 30;
+    const expiresAt = new Date(now + (durationDays * 24 * 60 * 60 * 1000));
 
     if (key.plan === 'enterprise') {
       if (!interaction.guildId) {
@@ -1271,7 +1398,7 @@ client.on('interactionCreate', async interaction => {
       }
       await Promise.all([
         Guild.updateOne({ guildId: interaction.guildId }, { $set: { plan: 'enterprise', expiresAt } }, { upsert: true }),
-        UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+        UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now, targetGuild: interaction.guildId } })
       ]);
 
       const embed = new EmbedBuilder()
@@ -1280,28 +1407,212 @@ client.on('interactionCreate', async interaction => {
         .setDescription(
           `Congratulations! **${interaction.guild?.name}** has been upgraded to the **ENTERPRISE** plan.\n\n` +
           `Advanced infrastructure and custom branding are now available to all members.\n\n` +
+          `**Redeemed By:** <@${user.id}>\n` +
           `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`
         )
         .setFooter({ text: 'NebulaMailCord Server Intelligence Synced' });
       return interaction.reply({ embeds: [embed] });
     }
 
+    const recipient = targetUser || user;
+
     await Promise.all([
-      User.updateOne({ discordId: user.id }, { $set: { plan: key.plan, expiresAt } }, { upsert: true }),
-      UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+      User.updateOne({ discordId: recipient.id }, { $set: { plan: key.plan, expiresAt } }, { upsert: true }),
+      UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, targetUser: recipient.id, redeemedAt: now } })
     ]);
+
+    const isGift = recipient.id !== user.id;
 
     const embed = new EmbedBuilder()
       .setColor('#2ECC71')
       .setTitle(`${BOT_EMOJIS.VERIFY} Nebula Core: Priority Level Up`)
       .setDescription(
-        `Welcome to **Nebula ${key.plan.toUpperCase()}**, <@${user.id}>!\n\n` +
-        `Your account has been elevated with premium perks for the next **${key.durationDays || 30} days**.\n\n` +
+        `Welcome to **Nebula ${key.plan.toUpperCase()}**, <@${recipient.id}>!\n\n` +
+        (isGift ? `*Activated on behalf by <@${user.id}>*\n\n` : '') +
+        `The account has been elevated with premium perks for the next **${durationDays} days**.\n\n` +
         `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`
       )
       .setFooter({ text: 'NebulaMailCord Intelligence Sync Complete' });
 
     return interaction.reply({ embeds: [embed] });
+  }
+
+  if (commandName === 'dev') {
+    if (!isDeveloper(user.id)) {
+      return interaction.reply({
+        content: `❌ **Access Denied:** Developer access only.`,
+        ephemeral: true
+      });
+    }
+
+    const sub = options.getSubcommand();
+
+    if (sub === 'setplan') {
+      const target = options.getUser('user', true);
+      const plan = options.getString('plan', true) as 'free' | 'premium' | 'supreme';
+      const days = options.getInteger('days');
+
+      let expiresAt: Date | null = null;
+      if (plan !== 'free') {
+        const durationDays = days && days > 0 ? days : 3650;
+        expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+      }
+
+      await User.updateOne(
+        { discordId: target.id },
+        { $set: { plan, expiresAt } },
+        { upsert: true }
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🛠️ Developer Override: User Plan Updated`)
+        .setDescription(
+          `**Target User:** <@${target.id}> (\`${target.id}\`)\n` +
+          `**New Plan:** \`${plan.toUpperCase()}\`\n` +
+          (expiresAt ? `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R> (${days || 3650} days)\n` : `**Expiry:** None (Free tier)\n`) +
+          `**Updated By:** <@${user.id}>`
+        )
+        .setTimestamp();
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (sub === 'setserver') {
+      const targetGuildId = options.getString('guild_id') || interaction.guildId;
+      if (!targetGuildId) {
+        return interaction.reply({ content: `❌ Please provide a \`guild_id\` or run this command inside a server.`, ephemeral: true });
+      }
+      const plan = options.getString('plan', true) as 'free' | 'pro' | 'enterprise';
+      const days = options.getInteger('days');
+
+      let expiresAt: Date | null = null;
+      if (plan !== 'free') {
+        const durationDays = days && days > 0 ? days : 3650;
+        expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+      }
+
+      await Guild.updateOne(
+        { guildId: targetGuildId },
+        { $set: { plan, expiresAt } },
+        { upsert: true }
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🛠️ Developer Override: Server Plan Updated`)
+        .setDescription(
+          `**Guild ID:** \`${targetGuildId}\`\n` +
+          `**New Plan:** \`${plan.toUpperCase()}\`\n` +
+          (expiresAt ? `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>\n` : `**Expiry:** None (Free)\n`) +
+          `**Updated By:** <@${user.id}>`
+        )
+        .setTimestamp();
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (sub === 'userinfo') {
+      const target = options.getUser('user', true);
+      const [uData, aliases, forwarders] = await Promise.all([
+        User.findOne({ discordId: target.id }).lean(),
+        Alias.find({ ownerId: target.id }).lean(),
+        Destination.find({ ownerId: target.id }).lean()
+      ]);
+
+      const plan = (uData as any)?.plan || 'free';
+      const expiresAt = (uData as any)?.expiresAt;
+      const privacy = (uData as any)?.privacyMode ? 'Enabled 🔒' : 'Disabled 🔓';
+      const activeAliases = (aliases as any[]).filter(a => a.status === 'active').length;
+      const deletedAliases = (aliases as any[]).filter(a => a.status === 'deleted').length;
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🔍 Developer Diagnostics: User Profile`)
+        .setThumbnail(target.displayAvatarURL())
+        .addFields(
+          { name: 'User', value: `<@${target.id}> (\`${target.tag || target.username}\`)`, inline: true },
+          { name: 'User ID', value: `\`${target.id}\``, inline: true },
+          { name: 'Plan Tier', value: `\`${plan.toUpperCase()}\``, inline: true },
+          { name: 'Plan Expiration', value: expiresAt ? `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F> (<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:R>)` : '`Permanent / N/A`', inline: false },
+          { name: 'Active Aliases', value: `\`${activeAliases}\` active (\`${deletedAliases}\` deleted)`, inline: true },
+          { name: 'Forwarders', value: `\`${(forwarders as any[]).length}\` configured`, inline: true },
+          { name: 'Privacy Mode', value: privacy, inline: true },
+          { name: 'Recovery Email', value: (uData as any)?.recoveryEmail ? `\`${(uData as any).recoveryEmail}\`` : '*Not set*', inline: true },
+          { name: 'Recovery Phone', value: (uData as any)?.recoveryPhone ? `\`${(uData as any).recoveryPhone}\`` : '*Not set*', inline: true }
+        )
+        .setFooter({ text: `Requested by ${user.tag}` })
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (sub === 'resetuser') {
+      const target = options.getUser('user', true);
+      await User.updateOne({ discordId: target.id }, { $set: { plan: 'free', expiresAt: null } });
+      return interaction.reply({
+        content: `✅ Reset plan for <@${target.id}> back to **FREE** tier.`,
+        ephemeral: true
+      });
+    }
+
+    if (sub === 'genkey') {
+      const plan = options.getString('plan', true).toLowerCase();
+      const duration = options.getInteger('duration') || 30;
+      const key = `NEBULA-${plan.toUpperCase().charAt(0)}${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      await UpgradeKey.create({
+        code: key,
+        plan: plan as any,
+        durationDays: duration
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor('#2ECC71')
+        .setTitle(`${BOT_EMOJIS.VERIFY} Upgrade Key Generated`)
+        .setDescription(
+          `**Plan:** \`${plan.toUpperCase()}\`\n` +
+          `**Duration:** \`${duration} Days\`\n\n` +
+          `**Redeem Code:**\n` +
+          `\`\`\`${key}\`\`\`\n` +
+          `**Redeem Command:**\n` +
+          `> \`${PREFIX}redeem ${key}\` or \`/redeem code:${key}\``
+        )
+        .setFooter({ text: 'Authorized Developer Console' })
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (sub === 'listkeys') {
+      const statusFilter = options.getString('status') || 'unused';
+      const query = statusFilter === 'unused' ? { used: { $ne: true } } : {};
+      const keys = await UpgradeKey.find(query).sort({ _id: -1 }).limit(10).lean();
+
+      if (!keys || keys.length === 0) {
+        return interaction.reply({ content: `ℹ️ No keys found for filter: \`${statusFilter}\``, ephemeral: true });
+      }
+
+      const keyList = (keys as any[]).map((k, i) => {
+        const status = k.used ? `❌ Used by <@${k.usedBy}>` : `✅ Active / Unused`;
+        return `**${i + 1}. \`${k.code}\`** — \`${k.plan.toUpperCase()}\` (${k.durationDays || 30}d)\n   └ Status: ${status}`;
+      }).join('\n\n');
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🔑 Upgrade Keys (${statusFilter.toUpperCase()})`)
+        .setDescription(keyList)
+        .setFooter({ text: 'Showing up to 10 most recent keys' });
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    if (sub === 'deletekey') {
+      const code = options.getString('code', true).trim().toUpperCase();
+      const res = await UpgradeKey.deleteOne({ code });
+      if (res.deletedCount === 0) {
+        return interaction.reply({ content: `❌ Key \`${code}\` not found.`, ephemeral: true });
+      }
+      return interaction.reply({ content: `✅ Key \`${code}\` has been deleted/revoked.`, ephemeral: true });
+    }
   }
 } catch (err) {
     console.error('[CRITICAL] Interaction Handler Error:', err);
@@ -1796,18 +2107,20 @@ client.on('messageCreate', async message => {
         const e = new EmbedBuilder()
             .setColor('#8B5CF6')
             .setTitle(`🛠️ MailCord | Developer & Diagnostic Commands`)
-            .setDescription(`System telemetry, diagnostics, and developer controls for MailCord.\n\n━━━━━━━━━━━━━━━━━━`)
+            .setDescription(`System telemetry, user management, and developer controls for MailCord.\n\n━━━━━━━━━━━━━━━━━━`)
             .addFields(
-              { name: `\`!devkey <plan> [days]\``, value: `→ Generate a redeemable license code (*plans: premium, supreme, enterprise*).`, inline: false },
-              { name: `\`!test <alias>\``, value: `→ Run live SMTP handshake, DNS/MX verification, and send diagnostic probe email.`, inline: false },
-              { name: `\`!servers\``, value: `→ Display connected Discord servers and cluster reach.`, inline: false },
-              { name: `\`!users\``, value: `→ Display global connected user count across all servers.`, inline: false },
+              { name: `\`!dev setplan <@user|id> <tier> [days]\``, value: `→ Directly update any user's subscription tier (*free, premium, supreme*).`, inline: false },
+              { name: `\`!dev setserver [guild_id] <tier> [days]\``, value: `→ Directly update server tier (*free, pro, enterprise*).`, inline: false },
+              { name: `\`!dev userinfo <@user|id>\``, value: `→ View detailed account profile, quota usages, and expiration.`, inline: false },
+              { name: `\`!dev resetuser <@user|id>\``, value: `→ Downgrade user back to free tier.`, inline: false },
+              { name: `\`!dev genkey <plan> [days]\``, value: `→ Generate a redeemable license code (*premium, supreme, enterprise*).`, inline: false },
+              { name: `\`!dev keys [unused|all]\``, value: `→ List recently generated license keys and status.`, inline: false },
+              { name: `\`!dev delkey <code>\``, value: `→ Delete or revoke an unused license key.`, inline: false },
+              { name: `\`!redeem <code> [@user]\``, value: `→ Redeem an upgrade key (optionally apply to target @user).`, inline: false },
+              { name: `\`!test <alias>\``, value: `→ Run live SMTP handshake, DNS/MX verification, and probe test.`, inline: false },
+              { name: `\`!servers\` / \`!users\``, value: `→ Display connected Discord servers and global user count.`, inline: false },
               { name: `\`!reload\``, value: `→ Refresh application slash commands and flush local cache.`, inline: false },
-              { name: `\`!backup\``, value: `→ Export server configuration and routing settings as JSON. *(Admin)*`, inline: false },
-              { name: `\`!restore\``, value: `→ Restore server configuration from an uploaded JSON file. *(Admin)*`, inline: false },
-              { name: `\`!redeem <code>\``, value: `→ Redeem an enterprise or pro license key.`, inline: false },
-              { name: `\`!stats\``, value: `→ View memory heap, uptime, process PID, and latency telemetry.`, inline: false },
-              { name: `\`!listc dev\``, value: `→ Show this developer & diagnostic commands directory.`, inline: false }
+              { name: `\`!stats\``, value: `→ View memory heap, uptime, process PID, and latency telemetry.`, inline: false }
             )
             .setFooter({ text: `MailCord Developer Access Authorized • PID: ${PROCESS_ID} • BUILD: ${BUILD_TIME}` })
             .setTimestamp();
@@ -3067,19 +3380,37 @@ client.on('messageCreate', async message => {
 
   if (command === 'redeem') {
     const code = args.shift()?.toUpperCase();
-    if (!code) return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}redeem <YOUR-CODE>\``);
+    if (!code) return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}redeem <YOUR-CODE> [@user]\``);
+
+    const targetArg = args.shift();
+    let targetUser = message.mentions.users.first();
+    if (!targetUser && targetArg) {
+      const cleanId = targetArg.replace(/[<@!>]/g, '');
+      if (/^\d{17,20}$/.test(cleanId)) {
+        targetUser = await client.users.fetch(cleanId).catch(() => null) as any;
+      }
+    }
+
+    if (targetUser && targetUser.id !== user.id) {
+      const isDev = isDeveloper(user.id);
+      const isGuildAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator) || message.member?.permissions.has(PermissionFlagsBits.ManageGuild);
+      if (!isDev && !isGuildAdmin) {
+        return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Only developers or server administrators can redeem license keys for other users.`, '#E74C3C');
+      }
+    }
 
     const key = await UpgradeKey.findOne({ code, used: { $ne: true } }).lean();
     if (!key) return reply(`${BOT_EMOJIS.WARNING} **Invalid or Expired Code.** This key may have already been used.`);
 
     const now = Date.now();
-    const expiresAt = new Date(now + ((key.durationDays || 30) * 24 * 60 * 60 * 1000));
+    const durationDays = key.durationDays || 30;
+    const expiresAt = new Date(now + (durationDays * 24 * 60 * 60 * 1000));
 
     if (key.plan === 'enterprise') {
         if (!message.guildId) return reply(`${BOT_EMOJIS.WARNING} **Server Key Detected:** Please redeem this key inside a server to upgrade it.`, '#F1C40F');
         await Promise.all([
           Guild.updateOne({ guildId: message.guildId }, { $set: { plan: 'enterprise', expiresAt } }),
-          UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+          UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now, targetGuild: message.guildId } })
         ]);
         
         const embed = new EmbedBuilder()
@@ -3087,25 +3418,268 @@ client.on('messageCreate', async message => {
           .setTitle(`${BOT_EMOJIS.VERIFY} Server Upgrade: Enterprise Tier`)
           .setDescription(`Congratulations! **${message.guild?.name}** has been upgraded to the **ENTERPRISE** plan.\n\n` +
             `Advanced infrastructure and custom branding are now available to all members.\n\n` +
+            `**Redeemed By:** <@${user.id}>\n` +
             `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`)
           .setFooter({ text: 'NebulaMailCord Server Intelligence Synced' });
         return reply(embed);
     }
 
+    const recipient = targetUser || user;
+
     await Promise.all([
-      User.updateOne({ discordId: user.id }, { $set: { plan: key.plan, expiresAt } }),
-      UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+      User.updateOne({ discordId: recipient.id }, { $set: { plan: key.plan, expiresAt } }),
+      UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, targetUser: recipient.id, redeemedAt: now } })
     ]);
+
+    const isGift = recipient.id !== user.id;
 
     const embed = new EmbedBuilder()
       .setColor('#2ECC71')
       .setTitle(`${BOT_EMOJIS.VERIFY} Nebula Core: Priority Level Up`)
-      .setDescription(`Welcome to **Nebula ${key.plan.toUpperCase()}**, <@${user.id}>!\n\n` +
-        `Your account has been elevated with premium perks for the next **${key.durationDays || 30} days**.\n\n` +
+      .setDescription(`Welcome to **Nebula ${key.plan.toUpperCase()}**, <@${recipient.id}>!\n\n` +
+        (isGift ? `*Activated on behalf by <@${user.id}>*\n\n` : '') +
+        `The account has been elevated with premium perks for the next **${durationDays} days**.\n\n` +
         `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`)
       .setFooter({ text: 'NebulaMailCord Intelligence Sync Complete' });
 
     return reply(embed);
+  }
+
+  if (command === 'dev' || command === 'developer') {
+    if (!isDeveloper(user.id)) {
+      return reply(`❌ **Restricted:** Only authorized developers can access developer commands.`, '#E74C3C');
+    }
+
+    const sub = args.shift()?.toLowerCase();
+
+    if (!sub || sub === 'help') {
+      const devEmbed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🛠️ NebulaMailCord Developer Control Panel`)
+        .setDescription(`Developer management commands for users, servers, and keys.\n\n` +
+          `**User Management:**\n` +
+          `• \`${PREFIX}dev setplan <@user|id> <free|premium|supreme> [days]\` — Set user tier\n` +
+          `• \`${PREFIX}dev userinfo <@user|id>\` — View database profile & telemetry\n` +
+          `• \`${PREFIX}dev resetuser <@user|id>\` — Reset user to free tier\n\n` +
+          `**Server Management:**\n` +
+          `• \`${PREFIX}dev setserver [guild_id] <free|pro|enterprise> [days]\` — Set server tier\n\n` +
+          `**Key Management:**\n` +
+          `• \`${PREFIX}dev genkey <premium|supreme|enterprise> [days]\` — Generate license key\n` +
+          `• \`${PREFIX}dev keys [unused|all]\` — List recent keys\n` +
+          `• \`${PREFIX}dev delkey <code>\` — Revoke / delete a key\n\n` +
+          `**Redeem on behalf of user:**\n` +
+          `• \`${PREFIX}redeem <KEY> <@user|id>\` or \`/redeem code:<KEY> user:@user\``)
+        .setFooter({ text: `Authorized Developer: ${user.tag}` })
+        .setTimestamp();
+      return reply(devEmbed);
+    }
+
+    if (sub === 'setplan' || sub === 'plan') {
+      const targetArg = args.shift();
+      let target = message.mentions.users.first();
+      if (!target && targetArg) {
+        const cleanId = targetArg.replace(/[<@!>]/g, '');
+        if (/^\d{17,20}$/.test(cleanId)) {
+          target = await client.users.fetch(cleanId).catch(() => null) as any;
+        }
+      }
+
+      const plan = args.shift()?.toLowerCase();
+      if (!target || !plan || !['free', 'premium', 'supreme'].includes(plan)) {
+        return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev setplan <@user|id> <free|premium|supreme> [days]\``);
+      }
+
+      const days = parseInt(args.shift() || '30') || 30;
+      let expiresAt: Date | null = null;
+      if (plan !== 'free') {
+        expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      }
+
+      await User.updateOne(
+        { discordId: target.id },
+        { $set: { plan, expiresAt } },
+        { upsert: true }
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🛠️ Developer Override: Plan Updated`)
+        .setDescription(
+          `**Target User:** <@${target.id}> (\`${target.id}\`)\n` +
+          `**New Plan:** \`${plan.toUpperCase()}\`\n` +
+          (expiresAt ? `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R> (${days} days)\n` : `**Expiry:** None (Free)\n`) +
+          `**Updated By:** <@${user.id}>`
+        )
+        .setTimestamp();
+      return reply(embed);
+    }
+
+    if (sub === 'setserver' || sub === 'serverplan') {
+      let guildId = message.guildId;
+      let planArg = args.shift()?.toLowerCase();
+      let daysArg = args.shift();
+
+      if (planArg && /^\d{17,20}$/.test(planArg)) {
+        guildId = planArg;
+        planArg = daysArg?.toLowerCase();
+        daysArg = args.shift();
+      }
+
+      if (!guildId || !planArg || !['free', 'pro', 'enterprise'].includes(planArg)) {
+        return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev setserver [guild_id] <free|pro|enterprise> [days]\``);
+      }
+
+      const days = parseInt(daysArg || '30') || 30;
+      let expiresAt: Date | null = null;
+      if (planArg !== 'free') {
+        expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      }
+
+      await Guild.updateOne(
+        { guildId },
+        { $set: { plan: planArg, expiresAt } },
+        { upsert: true }
+      );
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🛠️ Developer Override: Server Plan Updated`)
+        .setDescription(
+          `**Guild ID:** \`${guildId}\`\n` +
+          `**New Plan:** \`${planArg.toUpperCase()}\`\n` +
+          (expiresAt ? `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R> (${days} days)\n` : `**Expiry:** None (Free)\n`) +
+          `**Updated By:** <@${user.id}>`
+        )
+        .setTimestamp();
+      return reply(embed);
+    }
+
+    if (sub === 'userinfo' || sub === 'info' || sub === 'inspect') {
+      const targetArg = args.shift();
+      let target = message.mentions.users.first();
+      if (!target && targetArg) {
+        const cleanId = targetArg.replace(/[<@!>]/g, '');
+        if (/^\d{17,20}$/.test(cleanId)) {
+          target = await client.users.fetch(cleanId).catch(() => null) as any;
+        }
+      }
+      if (!target) {
+        return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev userinfo <@user|id>\``);
+      }
+
+      const [uData, aliases, forwarders] = await Promise.all([
+        User.findOne({ discordId: target.id }).lean(),
+        Alias.find({ ownerId: target.id }).lean(),
+        Destination.find({ ownerId: target.id }).lean()
+      ]);
+
+      const plan = (uData as any)?.plan || 'free';
+      const expiresAt = (uData as any)?.expiresAt;
+      const privacy = (uData as any)?.privacyMode ? 'Enabled 🔒' : 'Disabled 🔓';
+      const activeAliases = (aliases as any[]).filter(a => a.status === 'active').length;
+      const deletedAliases = (aliases as any[]).filter(a => a.status === 'deleted').length;
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🔍 Developer Diagnostics: User Profile`)
+        .setThumbnail(target.displayAvatarURL())
+        .addFields(
+          { name: 'User', value: `<@${target.id}> (\`${target.tag || target.username}\`)`, inline: true },
+          { name: 'User ID', value: `\`${target.id}\``, inline: true },
+          { name: 'Plan Tier', value: `\`${plan.toUpperCase()}\``, inline: true },
+          { name: 'Plan Expiration', value: expiresAt ? `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F> (<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:R>)` : '`Permanent / N/A`', inline: false },
+          { name: 'Active Aliases', value: `\`${activeAliases}\` active (\`${deletedAliases}\` deleted)`, inline: true },
+          { name: 'Forwarders', value: `\`${(forwarders as any[]).length}\` configured`, inline: true },
+          { name: 'Privacy Mode', value: privacy, inline: true },
+          { name: 'Recovery Email', value: (uData as any)?.recoveryEmail ? `\`${(uData as any).recoveryEmail}\`` : '*Not set*', inline: true },
+          { name: 'Recovery Phone', value: (uData as any)?.recoveryPhone ? `\`${(uData as any).recoveryPhone}\`` : '*Not set*', inline: true }
+        )
+        .setFooter({ text: `Diagnostics requested by ${user.tag}` })
+        .setTimestamp();
+
+      return reply(embed);
+    }
+
+    if (sub === 'resetuser' || sub === 'reset') {
+      const targetArg = args.shift();
+      let target = message.mentions.users.first();
+      if (!target && targetArg) {
+        const cleanId = targetArg.replace(/[<@!>]/g, '');
+        if (/^\d{17,20}$/.test(cleanId)) {
+          target = await client.users.fetch(cleanId).catch(() => null) as any;
+        }
+      }
+      if (!target) {
+        return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev resetuser <@user|id>\``);
+      }
+
+      await User.updateOne({ discordId: target.id }, { $set: { plan: 'free', expiresAt: null } });
+      return reply(`✅ Plan for <@${target.id}> reset back to **FREE** tier.`);
+    }
+
+    if (sub === 'genkey' || sub === 'devkey' || sub === 'makekey') {
+      const plan = args.shift()?.toLowerCase();
+      if (!['premium', 'supreme', 'enterprise'].includes(plan!)) {
+        return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev genkey <premium|supreme|enterprise> [days]\``);
+      }
+      const duration = parseInt(args.shift() || '30') || 30;
+      const key = `NEBULA-${plan?.toUpperCase().charAt(0)}${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      await UpgradeKey.create({
+        code: key,
+        plan: plan as any,
+        durationDays: duration
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor('#2ECC71')
+        .setTitle(`${BOT_EMOJIS.VERIFY} Upgrade Key Generated`)
+        .setDescription(
+          `**Plan:** \`${plan?.toUpperCase()}\`\n` +
+          `**Duration:** \`${duration} Days\`\n\n` +
+          `**Redeem Code:**\n` +
+          `\`\`\`${key}\`\`\`\n` +
+          `**Redeem Command:**\n` +
+          `> \`${PREFIX}redeem ${key}\` or \`/redeem code:${key}\``
+        )
+        .setFooter({ text: 'Authorized Developer Mode' })
+        .setTimestamp();
+
+      return reply(embed);
+    }
+
+    if (sub === 'keys' || sub === 'listkeys') {
+      const filter = args.shift()?.toLowerCase() || 'unused';
+      const query = filter === 'all' ? {} : { used: { $ne: true } };
+      const keys = await UpgradeKey.find(query).sort({ _id: -1 }).limit(10).lean();
+
+      if (!keys || keys.length === 0) {
+        return reply(`ℹ️ No keys found for filter: \`${filter}\``);
+      }
+
+      const keyList = (keys as any[]).map((k, i) => {
+        const status = k.used ? `❌ Used by <@${k.usedBy}>` : `✅ Active / Unused`;
+        return `**${i + 1}. \`${k.code}\`** — \`${k.plan.toUpperCase()}\` (${k.durationDays || 30}d)\n   └ Status: ${status}`;
+      }).join('\n\n');
+
+      const embed = new EmbedBuilder()
+        .setColor('#8B5CF6')
+        .setTitle(`🔑 Upgrade Keys (${filter.toUpperCase()})`)
+        .setDescription(keyList)
+        .setFooter({ text: 'Showing up to 10 most recent keys' });
+
+      return reply(embed);
+    }
+
+    if (sub === 'delkey' || sub === 'deletekey') {
+      const code = args.shift()?.toUpperCase();
+      if (!code) return reply(`${BOT_EMOJIS.INFO} Usage: \`${PREFIX}dev delkey <CODE>\``);
+      const res = await UpgradeKey.deleteOne({ code });
+      if (res.deletedCount === 0) return reply(`❌ Key \`${code}\` not found.`);
+      return reply(`✅ Key \`${code}\` deleted/revoked.`);
+    }
+
+    return reply(`${BOT_EMOJIS.INFO} Unknown developer command. Type \`${PREFIX}dev help\` for a list of commands.`);
   }
 
   if (command === 'devkey' || command === 'genkey' || command === 'makekey' || (command === 'alias' && args[0] === 'genkey')) {
