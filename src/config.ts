@@ -19,4 +19,16 @@ export const REDIS_URI = process.env.REDIS_URI || '';
 
 export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 export const PREFIX = '!';
+export const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mailcord.devtushar.uk';
 export const DEVELOPER_ID = process.env.DEVELOPER_ID || process.env.OWNER_ID || '560057266942902273';
+export const DEVELOPER_IDS = Array.from(new Set([
+  '560057266942902273',
+  '1444680513271889950',
+  ...(process.env.DEVELOPER_ID ? process.env.DEVELOPER_ID.split(',') : []),
+  ...(process.env.OWNER_ID ? process.env.OWNER_ID.split(',') : [])
+].map(id => id.trim()).filter(Boolean)));
+
+export function isDeveloper(userId?: string | null): boolean {
+  if (!userId) return false;
+  return DEVELOPER_IDS.includes(userId);
+}

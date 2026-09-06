@@ -34,7 +34,7 @@ export default function Commands() {
     fetch('/api/auth/me')
       .then(res => (res.ok ? res.json() : null))
       .then(user => {
-        if (user && (user.isDeveloper || user.id === '560057266942902273')) {
+        if (user && (user.isDeveloper || user.id === '560057266942902273' || user.id === '1444680513271889950')) {
           setIsDeveloper(true);
         }
       })

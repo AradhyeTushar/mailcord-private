@@ -2,7 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
-import { DISCORD_APP_ID, DISCORD_CLIENT_SECRET, JWT_SECRET, DEVELOPER_ID } from '../src/config.js';
+import { DISCORD_APP_ID, DISCORD_CLIENT_SECRET, JWT_SECRET, DEVELOPER_ID, isDeveloper } from '../src/config.js';
 import { User, Guild, Alias, Email, Subscription } from '../src/db.js';
 import { syncUserPlan } from '../src/shared.js';
 
@@ -132,7 +132,7 @@ export const apiRouter = express.Router();
       const userRecord: any = await User.findOne({ discordId: user.id }).lean();
       res.json({ 
         ...user, 
-        isDeveloper: user.id === DEVELOPER_ID, 
+        isDeveloper: isDeveloper(user.id), 
         plan: userRecord?.plan || 'free', 
         managedGuilds: userRecord?.managedGuilds || [] 
       });

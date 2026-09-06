@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, REST, Routes, ChannelType, OverwriteType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, Partials, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ComponentType } from 'discord.js';
-import { DISCORD_APP_ID, DISCORD_BOT_TOKEN, CF_DOMAIN, PREFIX, DEVELOPER_ID } from '../src/config.js';
+import { DISCORD_APP_ID, DISCORD_BOT_TOKEN, CF_DOMAIN, PREFIX, DEVELOPER_ID, PUBLIC_URL, isDeveloper } from '../src/config.js';
 import { 
   getEffectiveLimits, 
   PRESETS, 
@@ -13,9 +13,12 @@ import {
   deleteCloudflareAlias,
   emailReceiveRateLimit
 } from '../src/shared.js';
-import { connectDB, Alias, User, Guild, Email, MailThread, MailBlock, Destination, UpgradeKey } from '../src/db.js';
+import { connectDB, Alias, User, Guild, Email, MailThread, MailBlock, Destination, UpgradeKey, Domain, Subscription } from '../src/db.js';
 import nodemailer from 'nodemailer';
 import { simpleParser } from 'mailparser';
+import { GoogleGenAI } from '@google/genai';
+
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const BUILD_TIME = "2026-04-19 07:30 UTC (NEBULA-X-V3)";
@@ -41,7 +44,12 @@ async function getCategoryOwner(categoryId: string): Promise<{ discordId: string
 
 // --- Discord Bot Setup ---
 const client = new Client({ 
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages
+  ],
   partials: [Partials.Channel, Partials.Message]
 });
 
@@ -63,7 +71,9 @@ const BOT_EMOJIS = {
   BAN: '🚫',
   BACKUP: '📦',
   LATENCY: '📶',
-  INFO: 'ℹ️'
+  INFO: 'ℹ️',
+  SEARCH: '🔍',
+  CARD: '💳'
 };
 
 // --- Background Jobs ---
@@ -217,12 +227,12 @@ async function setupUserWorkspace(interaction: any, user: any, guild: any) {
     ];
 
     if (botHighestRole) {
-      const rolesToBlock = guild.roles.cache.filter(role => 
+      const rolesToBlock = guild.roles.cache.filter((role: any) => 
         role.position < botHighestRole.position && 
         role.id !== guild.id && 
         !botMember!.roles.cache.has(role.id)
       );
-      const limitedRoles = Array.from(rolesToBlock.values()).slice(0, 200);
+      const limitedRoles: any[] = Array.from(rolesToBlock.values()).slice(0, 200);
       for (const role of limitedRoles) {
         permissionOverwrites.push({ id: role.id, deny: [PermissionFlagsBits.ViewChannel] });
       }
@@ -356,6 +366,41 @@ const commands = [
     options: [
       { name: 'list', description: 'List all servers the bot is in', type: 1 },
       { name: 'leave', description: 'Leave a specific server', type: 1, options: [{ name: 'id', description: 'Server ID', type: 3, required: true }] }
+    ]
+  },
+  {
+    name: 'devkey',
+    description: '🔑 Generate a redeemable license key (Developer Only)',
+    options: [
+      {
+        name: 'plan',
+        description: 'Plan tier to generate',
+        type: 3,
+        required: true,
+        choices: [
+          { name: 'Premium (Personal Power User)', value: 'premium' },
+          { name: 'Supreme (Pro Identity)', value: 'supreme' },
+          { name: 'Enterprise (Server-Wide)', value: 'enterprise' }
+        ]
+      },
+      {
+        name: 'duration',
+        description: 'Duration in days (default: 30)',
+        type: 4,
+        required: false
+      }
+    ]
+  },
+  {
+    name: 'redeem',
+    description: '✨ Redeem an upgrade license code to elevate your account or server',
+    options: [
+      {
+        name: 'code',
+        description: 'The upgrade key code (e.g. NEBULA-PXXXX-XXXX)',
+        type: 3,
+        required: true
+      }
     ]
   }
 ];
@@ -850,8 +895,9 @@ client.on('interactionCreate', async interaction => {
   }
 
   if (commandName === 'alias') {
-      const userRecord: any = await User.findOne({ discordId: user.id }).lean() || { guilds: {} };
-      const userGuildData = userRecord.guilds?.[interaction.guildId!];
+    const user = interaction.user;
+    const userRecord: any = await User.findOne({ discordId: user.id }).lean() || { guilds: {} };
+    const userGuildData = userRecord.guilds?.[interaction.guildId!];
 
     // Global Lockdown handles cross-user privacy. 
     // Here we ensure the owner is in the correct Hub channel.
@@ -864,7 +910,6 @@ client.on('interactionCreate', async interaction => {
 
     const sub = options.getSubcommand();
     const aliasName = options.getString('name')?.toLowerCase().replace(/[^a-z0-9-]/g, '');
-    const user = interaction.user;
     const now = Date.now();
 
     if (sub === 'create') {
@@ -1159,10 +1204,108 @@ client.on('interactionCreate', async interaction => {
 
     return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
   }
+
+  if (commandName === 'devkey') {
+    if (!isDeveloper(user.id)) {
+      return interaction.reply({
+        content: `❌ **Restricted:** Only the authorized developer (<@${DEVELOPER_ID}>) can generate upgrade keys.`,
+        ephemeral: true
+      });
+    }
+
+    const plan = options.getString('plan', true).toLowerCase();
+    const duration = options.getInteger('duration') || 30;
+
+    const key = `NEBULA-${plan.toUpperCase().charAt(0)}${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+    try {
+      await UpgradeKey.create({
+        code: key,
+        plan: plan as any,
+        durationDays: duration
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor('#2ECC71')
+        .setTitle(`${BOT_EMOJIS.VERIFY} Upgrade Key Generated Successfully`)
+        .setDescription(
+          `**Plan:** \`${plan.toUpperCase()}\`\n` +
+          `**Duration:** \`${duration} Days\`\n\n` +
+          `**Redeem Code:**\n` +
+          `\`\`\`${key}\`\`\`\n` +
+          `**How Recipient Redeems:**\n` +
+          `Recipient runs in Discord:\n` +
+          `> \`${PREFIX}redeem ${key}\` or \`/redeem code:${key}\``
+        )
+        .setFooter({ text: 'Share this code privately with the user or server owner.' })
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed], ephemeral: true });
+    } catch (err: any) {
+      return interaction.reply({ content: `❌ Failed to generate key: ${err.message}`, ephemeral: true });
+    }
+  }
+
+  if (commandName === 'redeem') {
+    const code = options.getString('code', true).trim().toUpperCase();
+    const key = await UpgradeKey.findOne({ code, used: { $ne: true } }).lean();
+    if (!key) {
+      return interaction.reply({
+        content: `${BOT_EMOJIS.WARNING} **Invalid or Expired Code.** This key may have already been used or does not exist.`,
+        ephemeral: true
+      });
+    }
+
+    const now = Date.now();
+    const expiresAt = new Date(now + ((key.durationDays || 30) * 24 * 60 * 60 * 1000));
+
+    if (key.plan === 'enterprise') {
+      if (!interaction.guildId) {
+        return interaction.reply({
+          content: `${BOT_EMOJIS.WARNING} **Server Key Detected:** Please redeem this key inside a server to upgrade it.`,
+          ephemeral: true
+        });
+      }
+      await Promise.all([
+        Guild.updateOne({ guildId: interaction.guildId }, { $set: { plan: 'enterprise', expiresAt } }, { upsert: true }),
+        UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+      ]);
+
+      const embed = new EmbedBuilder()
+        .setColor('#F1C40F')
+        .setTitle(`${BOT_EMOJIS.VERIFY} Server Upgrade: Enterprise Tier`)
+        .setDescription(
+          `Congratulations! **${interaction.guild?.name}** has been upgraded to the **ENTERPRISE** plan.\n\n` +
+          `Advanced infrastructure and custom branding are now available to all members.\n\n` +
+          `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`
+        )
+        .setFooter({ text: 'NebulaMailCord Server Intelligence Synced' });
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    await Promise.all([
+      User.updateOne({ discordId: user.id }, { $set: { plan: key.plan, expiresAt } }, { upsert: true }),
+      UpgradeKey.updateOne({ code }, { $set: { used: true, usedBy: user.id, redeemedAt: now } })
+    ]);
+
+    const embed = new EmbedBuilder()
+      .setColor('#2ECC71')
+      .setTitle(`${BOT_EMOJIS.VERIFY} Nebula Core: Priority Level Up`)
+      .setDescription(
+        `Welcome to **Nebula ${key.plan.toUpperCase()}**, <@${user.id}>!\n\n` +
+        `Your account has been elevated with premium perks for the next **${key.durationDays || 30} days**.\n\n` +
+        `**Expiry:** <t:${Math.floor(expiresAt.getTime() / 1000)}:R>`
+      )
+      .setFooter({ text: 'NebulaMailCord Intelligence Sync Complete' });
+
+    return interaction.reply({ embeds: [embed] });
+  }
 } catch (err) {
     console.error('[CRITICAL] Interaction Handler Error:', err);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ An unexpected error occurred. Please try again later.', ephemeral: true }).catch(() => null);
+    if ('isRepliable' in interaction && interaction.isRepliable()) {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ An unexpected error occurred. Please try again later.', ephemeral: true }).catch(() => null);
+      }
     }
   }
 });
@@ -1235,7 +1378,7 @@ async function getMemberPlan(userId: string, guildId?: string) {
 }
 
 function canSeeAdmin(message: any) {
-  return message.author.id === DEVELOPER_ID || message.member?.permissions.has(PermissionFlagsBits.Administrator) || message.member?.permissions.has(PermissionFlagsBits.ManageGuild);
+  return isDeveloper(message.author.id) || message.member?.permissions?.has(PermissionFlagsBits.Administrator) || message.member?.permissions?.has(PermissionFlagsBits.ManageGuild);
 }
 
 client.on('messageCreate', async message => {
@@ -1265,7 +1408,7 @@ client.on('messageCreate', async message => {
 
   // 2. Strict Privacy Lockdown
   // If this channel is part of someone's private workspace, only allow the owner to speak.
-  if (message.channel.parentId) {
+  if ('parentId' in message.channel && message.channel.parentId) {
     const userWithThisCategory = await getCategoryOwner(message.channel.parentId);
     if (userWithThisCategory) {
        const authorId = message.author.id.toString();
@@ -1278,82 +1421,86 @@ client.on('messageCreate', async message => {
     }
   }
 
-
-  // --- DM Handler (ModMail Entry) ---
+  // --- DM Handler (ModMail Entry vs Direct Commands) ---
   if (!message.guild) {
     if (message.author.bot) return;
     
-    // Check if user is in any shared guilds
-    const sharedGuilds = client.guilds.cache.filter(g => g.members.cache.has(message.author.id));
-    if (sharedGuilds.size === 0) return;
+    // Check if the user is executing a bot command in DMs (e.g. !devkey, !help, !redeem, !status)
+    if (message.content.startsWith('!') || message.content.startsWith('/')) {
+      // Continue below to command parsing!
+    } else {
+      // Route as ModMail message
+      const sharedGuilds = client.guilds.cache.filter(g => g.members.cache.has(message.author.id));
+      if (sharedGuilds.size === 0) return;
 
-    // Route to the first shared guild that has ModMail setup
-    let targetGuildId = null;
-    for (const g of sharedGuilds.values()) {
-      const config: any = await Guild.findOne({ guildId: g.id }).lean();
-      if (config?.categoryId) {
-        targetGuildId = g.id;
-        break;
+      // Route to the first shared guild that has ModMail setup
+      let targetGuildId = null;
+      for (const g of sharedGuilds.values()) {
+        const config: any = await Guild.findOne({ guildId: g.id }).lean();
+        if (config?.categoryId) {
+          targetGuildId = g.id;
+          break;
+        }
       }
-    }
 
-    if (!targetGuildId) return message.reply("❌ The mail system is not configured on any shared servers.");
+      if (!targetGuildId) return message.reply("❌ The mail system is not configured on any shared servers.");
 
-    const guild = client.guilds.cache.get(targetGuildId)!;
-    const guildConfig: any = await Guild.findOne({ guildId: targetGuildId }).lean();
-    
-    // Check block list
-    const isBlocked = await MailBlock.findOne({ userId: message.author.id, guildId: targetGuildId }).lean();
-    if (isBlocked) return message.reply(`❌ You have been blocked from using the mail system in **${guild.name}**. Reason: ${isBlocked.reason}`);
-
-    const existingThread = await MailThread.findOne({ userId: message.author.id, guildId: targetGuildId, status: 'open' }).lean();
-    let threadChannel;
-
-    if (existingThread) {
-      threadChannel = await guild.channels.fetch(existingThread.channelId).catch(() => null);
-    }
-
-    if (!threadChannel) {
-      threadChannel = await guild.channels.create({
-        name: `mail-${message.author.username}`,
-        type: ChannelType.GuildText,
-        parent: guildConfig.categoryId,
-        topic: `DM Thread for ${message.author.tag} (${message.author.id})`
-      });
-
-      await MailThread.updateOne(
-        { userId: message.author.id, guildId: targetGuildId },
-        { $set: { channelId: threadChannel.id, status: 'open', createdAt: Date.now() } },
-        { upsert: true }
-      );
-
-      const welcomeEmbed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setTitle('📬 New DM Mail Thread')
-        .setDescription(`User: <@${message.author.id}>\nID: \`${message.author.id}\``)
-        .addFields({ name: 'Message', value: message.content || '[No Content]' });
+      const guild = client.guilds.cache.get(targetGuildId)!;
+      const guildConfig: any = await Guild.findOne({ guildId: targetGuildId }).lean();
       
-      await (threadChannel as any).send({ content: `<@&${guildConfig.supportRoleId || guildConfig.adminRoleId}>`, embeds: [welcomeEmbed] });
-      
-      if (guildConfig.welcomeMessage) {
-        await message.reply(guildConfig.welcomeMessage);
-      } else {
-        await message.reply("✅ Your message has been sent to the staff! A thread has been opened.");
+      // Check block list
+      const isBlocked = await MailBlock.findOne({ userId: message.author.id, guildId: targetGuildId }).lean();
+      if (isBlocked) return message.reply(`❌ You have been blocked from using the mail system in **${guild.name}**. Reason: ${isBlocked.reason}`);
+
+      const existingThread = await MailThread.findOne({ userId: message.author.id, guildId: targetGuildId, status: 'open' }).lean();
+      let threadChannel;
+
+      if (existingThread) {
+        threadChannel = await guild.channels.fetch(existingThread.channelId).catch(() => null);
       }
-      return;
-    }
 
-    const msgEmbed = new EmbedBuilder()
-      .setColor('#2ECC71')
-      .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
-      .setDescription(message.content || '[No Content]')
-      .setTimestamp();
-    
-    await (threadChannel as any).send({ embeds: [msgEmbed] });
-    return message.react('✅');
+      if (!threadChannel) {
+        threadChannel = await guild.channels.create({
+          name: `mail-${message.author.username}`,
+          type: ChannelType.GuildText,
+          parent: guildConfig.categoryId,
+          topic: `DM Thread for ${message.author.tag} (${message.author.id})`
+        });
+
+        await MailThread.updateOne(
+          { userId: message.author.id, guildId: targetGuildId },
+          { $set: { channelId: threadChannel.id, status: 'open', createdAt: Date.now() } },
+          { upsert: true }
+        );
+
+        const welcomeEmbed = new EmbedBuilder()
+          .setColor('#5865F2')
+          .setTitle('📬 New DM Mail Thread')
+          .setDescription(`User: <@${message.author.id}>\nID: \`${message.author.id}\``)
+          .addFields({ name: 'Message', value: message.content || '[No Content]' });
+        
+        await (threadChannel as any).send({ content: `<@&${guildConfig.supportRoleId || guildConfig.adminRoleId}>`, embeds: [welcomeEmbed] });
+        
+        if (guildConfig.welcomeMessage) {
+          await message.reply(guildConfig.welcomeMessage);
+        } else {
+          await message.reply("✅ Your message has been sent to the staff! A thread has been opened.");
+        }
+        return;
+      }
+
+      const msgEmbed = new EmbedBuilder()
+        .setColor('#2ECC71')
+        .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
+        .setDescription(message.content || '[No Content]')
+        .setTimestamp();
+      
+      await (threadChannel as any).send({ embeds: [msgEmbed] });
+      return message.react('✅');
+    }
   }
 
-  const guildConfig: any = await Guild.findOne({ guildId: message.guild.id }).lean() || { prefix: '!' };
+  const guildConfig: any = message.guild ? (await Guild.findOne({ guildId: message.guild.id }).lean() || { prefix: '!' }) : { prefix: '!' };
   const PREFIX = guildConfig.prefix || '!';
 
   if (!message.content.startsWith(PREFIX)) return;
@@ -1642,8 +1789,8 @@ client.on('messageCreate', async message => {
     }
 
     if (targetCat === 'dev' || targetCat === 'developer' || targetCat === 'devloper') {
-        if (message.author.id !== DEVELOPER_ID) {
-            return reply(`❌ **Access Denied:** Developer & diagnostic commands are strictly restricted to the authorized developer (<@${DEVELOPER_ID}>).`, '#E74C3C');
+        if (!isDeveloper(message.author.id)) {
+            return reply(`❌ **Access Denied:** Developer & diagnostic commands are strictly restricted to authorized developers.`, '#E74C3C');
         }
         const e = new EmbedBuilder()
             .setColor('#8B5CF6')
@@ -2034,7 +2181,7 @@ client.on('messageCreate', async message => {
 
   if (command === 'alias') {
     const userRecord: any = await User.findOne({ discordId: user.id }).lean() || { plan: 'free' };
-    const guildRecord: any = message.guildId ? await Guild.findOne({ guildId: message.guildId }).lean() || { plan: 'free' } : { plan: 'free' };
+    let guildRecord: any = message.guildId ? await Guild.findOne({ guildId: message.guildId }).lean() || { plan: 'free' } : { plan: 'free' };
     const userPlan = userRecord.plan || 'free';
     const limits = getEffectiveLimits(userPlan, guildRecord.plan);
     const expiresAtDefault = limits.aliasExpiryDays === Infinity ? undefined : now + (limits.aliasExpiryDays * 24 * 60 * 60 * 1000);
@@ -2866,18 +3013,22 @@ client.on('messageCreate', async message => {
 
   // --- Admin/Owner Info ---
   if (command === 'servers') {
-    if (user.id !== DEVELOPER_ID) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
+    if (!isDeveloper(user.id)) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
     return reply(`${BOT_EMOJIS.STATS} **Network Reach:** ${client.guilds.cache.size} Servers`);
   }
   if (command === 'users') {
-    if (user.id !== DEVELOPER_ID) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
+    if (!isDeveloper(user.id)) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
     return reply(`${BOT_EMOJIS.INFO} **Global Users:** ${client.users.cache.size} Connected`);
   }
   if (command === 'reload') {
-    if (user.id !== DEVELOPER_ID) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
+    if (!isDeveloper(user.id)) return reply(`${BOT_EMOJIS.WARNING} **Access Denied:** Developer access only.`, '#E74C3C');
     // Refresh slash commands
-    client.emit('ready', client);
-    return reply(`${BOT_EMOJIS.GEAR} **System Refreshed:** Commands and cache re-registered.`);
+    try {
+      await rest.put(Routes.applicationCommands(DISCORD_APP_ID), { body: commands });
+      return reply(`${BOT_EMOJIS.GEAR} **System Refreshed:** Slash commands and cache re-registered.`);
+    } catch (err: any) {
+      return reply(`${BOT_EMOJIS.WARNING} Failed to refresh commands: ${err.message}`, '#E74C3C');
+    }
   }
 
   if (command === 'backup') {
@@ -2957,8 +3108,8 @@ client.on('messageCreate', async message => {
   }
 
   if (command === 'devkey' || command === 'genkey' || command === 'makekey' || (command === 'alias' && args[0] === 'genkey')) {
-    if (user.id !== DEVELOPER_ID) {
-      return reply(`❌ **Restricted:** Only the authorized developer (<@${DEVELOPER_ID}>) can generate upgrade keys.`, '#E74C3C');
+    if (!isDeveloper(user.id)) {
+      return reply(`❌ **Restricted:** Only authorized developers can generate upgrade keys.`, '#E74C3C');
     }
 
     if (command === 'alias') args.shift();
@@ -2979,34 +3130,39 @@ client.on('messageCreate', async message => {
           `• \`${PREFIX}devkey premium 30\`\n` +
           `• \`${PREFIX}devkey supreme 60\`\n` +
           `• \`${PREFIX}devkey enterprise 365\`\n\n` +
-          `*(Aliases: \`${PREFIX}genkey\`, \`${PREFIX}makekey\`)*`)
-        .setFooter({ text: `Authorized Developer ID: ${DEVELOPER_ID}` });
+          `*(Aliases: \`${PREFIX}genkey\`, \`${PREFIX}makekey\`, or Slash Command \`/devkey\`)*`)
+        .setFooter({ text: `Authorized Developer Mode Active` });
       return reply(helpEmbed);
     }
     
-    const duration = parseInt(args.shift() || '30');
+    const duration = parseInt(args.shift() || '30') || 30;
     const key = `NEBULA-${plan?.toUpperCase().charAt(0)}${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-    await UpgradeKey.create({
-      code: key,
-      plan: plan as any,
-      durationDays: duration
-    });
+    try {
+      await UpgradeKey.create({
+        code: key,
+        plan: plan as any,
+        durationDays: duration
+      });
 
-    const embed = new EmbedBuilder()
-      .setColor('#2ECC71')
-      .setTitle(`${BOT_EMOJIS.VERIFY} Upgrade Key Generated Successfully`)
-      .setDescription(`**Plan:** \`${plan?.toUpperCase()}\`\n` +
-        `**Duration:** \`${duration} Days\`\n\n` +
-        `**Redeem Code:**\n` +
-        `\`\`\`${key}\`\`\`\n` +
-        `**How Recipient Redeems:**\n` +
-        `Recipient runs in Discord:\n` +
-        `> \`${PREFIX}redeem ${key}\``)
-      .setFooter({ text: 'Share this code privately with the user or server owner.' })
-      .setTimestamp();
-    
-    return reply(embed);
+      const embed = new EmbedBuilder()
+        .setColor('#2ECC71')
+        .setTitle(`${BOT_EMOJIS.VERIFY} Upgrade Key Generated Successfully`)
+        .setDescription(`**Plan:** \`${plan?.toUpperCase()}\`\n` +
+          `**Duration:** \`${duration} Days\`\n\n` +
+          `**Redeem Code:**\n` +
+          `\`\`\`${key}\`\`\`\n` +
+          `**How Recipient Redeems:**\n` +
+          `Recipient runs in Discord:\n` +
+          `> \`${PREFIX}redeem ${key}\` or \`/redeem code:${key}\``)
+        .setFooter({ text: 'Share this code privately with the user or server owner.' })
+        .setTimestamp();
+      
+      return reply(embed);
+    } catch (err: any) {
+      console.error('[DEVKEY ERROR] Failed to save key:', err);
+      return reply(`❌ **Error:** Failed to generate key: ${err.message}`, '#E74C3C');
+    }
   }
 });
 
@@ -3137,6 +3293,9 @@ function detectOTP(text: string): string | null {
 }
 
 async function analyzeEmail(subject: string, body: string) {
+  if (!ai) {
+    return { spamScore: 0, category: 'Other', summary: 'AI summary disabled (GEMINI_API_KEY not configured).' };
+  }
   try {
     const prompt = `Analyze the following email and provide a JSON response with the following fields:
     - spamScore: A number from 0 to 100 indicating how likely this is spam (100 = definitely spam).
@@ -3144,15 +3303,16 @@ async function analyzeEmail(subject: string, body: string) {
     - summary: A brief 1-2 sentence summary of the email content.
 
     Email Subject: ${subject}
-    Email Body: ${body.substring(0, 1000)} // Limit body to save tokens
-    `;
+    Email Body: ${body.substring(0, 1000)}`;
 
-    const response = await ai.generateContent(prompt);
-    const text = response.response.text();
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    const text = response.text;
     if (text) {
-      // Handle potential markdown formatting from Gemini
-      const jsonStr = text.replace(/```json|```/g, '').trim();
-      return JSON.parse(jsonStr);
+      return JSON.parse(text);
     }
   } catch (err) {
     console.error("Error analyzing email with Gemini:", err);

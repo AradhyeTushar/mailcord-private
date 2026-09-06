@@ -139,7 +139,7 @@ async function startServer() {
     socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
   });
 
-  const PORT = process.env.PORT || 3006;
+  const PORT = Number(process.env.PORT) || 3006;
 
   app.set('trust proxy', 1); // Trust the reverse proxy to get correct protocol (https)
   app.use(cookieParser());
