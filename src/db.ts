@@ -58,7 +58,8 @@ function createLiteModel(name: string) {
 
 // --- Schemas (Only used for Mongoose mode) ---
 const aliasSchema = new mongoose.Schema({
-  name: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  domain: { type: String, default: 'bot.devtushar.uk' },
   ownerId: { type: String, required: true, index: true },
   status: { type: String, required: true, index: true },
   locked: { type: Boolean, default: false },
@@ -106,6 +107,7 @@ const guildSchema = new mongoose.Schema({
 
 const emailSchema = new mongoose.Schema({
   alias: { type: String, required: true, index: true },
+  domain: { type: String, default: 'bot.devtushar.uk' },
   from: { type: String },
   subject: { type: String },
   body: { type: String },
@@ -134,8 +136,13 @@ const subscriptionSchema = new mongoose.Schema({
 
 const domainSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
+  guildId: { type: String },
   domain: { type: String, required: true, unique: true },
+  isSystem: { type: Boolean, default: false },
+  status: { type: String, enum: ['active', 'pending', 'error'], default: 'active' },
   verified: { type: Boolean, default: false },
+  mxConfigured: { type: Boolean, default: false },
+  txtConfigured: { type: Boolean, default: false },
   createdAt: { type: Date, default: () => new Date() }
 });
 

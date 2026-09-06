@@ -1,9 +1,10 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import dns from 'dns';
 import Razorpay from 'razorpay';
-import { DISCORD_APP_ID, DISCORD_CLIENT_SECRET, JWT_SECRET, DEVELOPER_ID, isDeveloper } from '../src/config.js';
-import { User, Guild, Alias, Email, Subscription } from '../src/db.js';
+import { DISCORD_APP_ID, DISCORD_CLIENT_SECRET, JWT_SECRET, DEVELOPER_ID, CF_DOMAIN, isDeveloper } from '../src/config.js';
+import { User, Guild, Alias, Email, Subscription, UpgradeKey, Domain } from '../src/db.js';
 import { syncUserPlan } from '../src/shared.js';
 
 // Initialize Razorpay lazily to ensure environment variables are loaded
@@ -296,6 +297,456 @@ export const apiRouter = express.Router();
     } catch (err) {
       console.error('Settings update error:', err);
       res.status(500).json({ error: 'Failed to update settings' });
+    }
+  });
+
+  // --- Web Alias Creation API ---
+  apiRouter.post('/aliases/create', requireAuth, async (req: any, res) => {
+    try {
+      const { name, domain } = req.body;
+      if (!name || typeof name !== 'string') {
+        return res.status(400).json({ error: 'Alias name is required' });
+      }
+
+      const cleanName = name.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+      if (cleanName.length < 2 || cleanName.length > 32) {
+        return res.status(400).json({ error: 'Alias name must be between 2 and 32 characters' });
+      }
+
+      const selectedDomain = (domain && typeof domain === 'string' ? domain.toLowerCase().trim() : CF_DOMAIN) || 'bot.devtushar.uk';
+
+      // Check user plan limits
+      const userRecord: any = await User.findOne({ discordId: req.user.id }).lean();
+      const plan = userRecord?.plan || 'free';
+      const userAliases = await Alias.find({ ownerId: req.user.id, status: 'active' }).lean();
+
+      const maxAllowed = plan === 'supreme' ? 100 : (plan === 'premium' ? 25 : 5);
+      if (userAliases.length >= maxAllowed) {
+        return res.status(403).json({ error: `Alias limit reached for your ${plan.toUpperCase()} plan (${userAliases.length}/${maxAllowed}). Please upgrade to create more.` });
+      }
+
+      // Check if alias already taken
+      const existing = await Alias.findOne({ name: cleanName, domain: selectedDomain, status: 'active' }).lean();
+      if (existing) {
+        return res.status(409).json({ error: `Alias '${cleanName}@${selectedDomain}' is already registered` });
+      }
+
+      const newAlias = await Alias.create({
+        name: cleanName,
+        domain: selectedDomain,
+        ownerId: req.user.id,
+        status: 'active',
+        locked: false,
+        emailsReceived: 0,
+        createdAt: Date.now()
+      });
+
+      res.json({ success: true, alias: newAlias });
+    } catch (err: any) {
+      console.error('Alias creation error:', err);
+      res.status(500).json({ error: err.message || 'Failed to create alias' });
+    }
+  });
+
+  // --- Multi-Domain API ---
+  apiRouter.get('/domains', requireAuth, async (req: any, res) => {
+    try {
+      const systemDomains = [
+        {
+          _id: 'sys-default',
+          domain: CF_DOMAIN || 'bot.devtushar.uk',
+          isSystem: true,
+          verified: true,
+          status: 'active',
+          mxConfigured: true,
+          txtConfigured: true,
+          createdAt: new Date()
+        }
+      ];
+
+      const extraSystem = await Domain.find({ isSystem: true, domain: { $ne: CF_DOMAIN || 'bot.devtushar.uk' } }).lean();
+      const userDomains = await Domain.find({ userId: req.user.id, isSystem: { $ne: true } }).lean();
+
+      res.json({
+        systemDomains: [...systemDomains, ...(extraSystem || [])],
+        userDomains: userDomains || []
+      });
+    } catch (err: any) {
+      console.error('Domains fetch error:', err);
+      res.status(500).json({ error: 'Failed to fetch domains' });
+    }
+  });
+
+  apiRouter.post('/domains', requireAuth, async (req: any, res) => {
+    try {
+      const { domain, guildId } = req.body;
+      if (!domain || typeof domain !== 'string') {
+        return res.status(400).json({ error: 'Domain name is required' });
+      }
+
+      const cleanDomain = domain.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      if (!cleanDomain.includes('.') || cleanDomain.length < 4) {
+        return res.status(400).json({ error: 'Please enter a valid domain name (e.g. mail.yourdomain.com)' });
+      }
+
+      // Check permissions
+      const isDev = isDeveloper(req.user.id);
+      const userRecord: any = await User.findOne({ discordId: req.user.id }).lean();
+      if (!isDev && userRecord?.plan !== 'supreme') {
+        return res.status(403).json({ error: 'Custom domains require the Supreme or Enterprise tier. Please upgrade to link domains.' });
+      }
+
+      // Check if domain exists
+      const existing = await Domain.findOne({ domain: cleanDomain }).lean();
+      if (existing) {
+        return res.status(409).json({ error: `Domain '${cleanDomain}' is already registered.` });
+      }
+
+      const newDomain = await Domain.create({
+        userId: req.user.id,
+        guildId: guildId || null,
+        domain: cleanDomain,
+        isSystem: false,
+        verified: false,
+        status: 'pending',
+        mxConfigured: false,
+        txtConfigured: false,
+        createdAt: new Date()
+      });
+
+      res.json({ success: true, domain: newDomain });
+    } catch (err: any) {
+      console.error('Domain register error:', err);
+      res.status(500).json({ error: err.message || 'Failed to register domain' });
+    }
+  });
+
+  apiRouter.post('/domains/:id/verify', requireAuth, async (req: any, res) => {
+    try {
+      const domainId = req.params.id;
+      const domainRecord: any = await Domain.findById(domainId).lean();
+      if (!domainRecord) {
+        return res.status(404).json({ error: 'Domain not found' });
+      }
+
+      if (domainRecord.userId !== req.user.id && !isDeveloper(req.user.id)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      let mxFound = false;
+      let txtFound = false;
+
+      try {
+        const mxRecords = await dns.promises.resolveMx(domainRecord.domain);
+        if (mxRecords && mxRecords.length > 0) {
+          mxFound = true;
+        }
+      } catch (e) {
+        // MX lookup failed
+      }
+
+      try {
+        const txtRecords = await dns.promises.resolveTxt(domainRecord.domain);
+        if (txtRecords && txtRecords.length > 0) {
+          txtFound = true;
+        }
+      } catch (e) {
+        // TXT lookup failed
+      }
+
+      const isVerified = mxFound || isDeveloper(req.user.id);
+
+      await Domain.updateOne(
+        { _id: domainId },
+        { 
+          $set: { 
+            verified: isVerified,
+            mxConfigured: mxFound,
+            txtConfigured: txtFound,
+            status: isVerified ? 'active' : 'pending' 
+          } 
+        }
+      );
+
+      res.json({
+        success: true,
+        verified: isVerified,
+        mxConfigured: mxFound,
+        txtConfigured: txtFound,
+        message: isVerified ? 'Domain verified successfully!' : 'DNS records not yet propagated. Please ensure MX records are pointing correctly and try again in a few minutes.'
+      });
+    } catch (err: any) {
+      console.error('Domain verify error:', err);
+      res.status(500).json({ error: err.message || 'Verification check failed' });
+    }
+  });
+
+  apiRouter.delete('/domains/:id', requireAuth, async (req: any, res) => {
+    try {
+      const domainId = req.params.id;
+      const domainRecord: any = await Domain.findById(domainId).lean();
+      if (!domainRecord) {
+        return res.status(404).json({ error: 'Domain not found' });
+      }
+
+      if (domainRecord.userId !== req.user.id && !isDeveloper(req.user.id)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      await Domain.deleteOne({ _id: domainId });
+      res.json({ success: true, message: 'Domain removed' });
+    } catch (err: any) {
+      console.error('Domain delete error:', err);
+      res.status(500).json({ error: 'Failed to delete domain' });
+    }
+  });
+
+  // --- Developer Dashboard Control Center API ---
+  const requireDevAuth = (req: any, res: any, next: any) => {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const user: any = jwt.verify(token, JWT_SECRET);
+      if (!isDeveloper(user.id)) {
+        return res.status(403).json({ error: 'Forbidden: Developer access required' });
+      }
+      req.user = user;
+      next();
+    } catch (err) {
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  };
+
+  apiRouter.get('/dev/overview', requireDevAuth, async (req: any, res) => {
+    try {
+      const [
+        totalUsers,
+        totalAliases,
+        totalEmails,
+        activeKeys,
+        usedKeys,
+        totalDomains,
+        subscriptionsCount
+      ] = await Promise.all([
+        User.countDocuments({}),
+        Alias.countDocuments({ status: 'active' }),
+        Email.countDocuments({}),
+        UpgradeKey.countDocuments({ used: { $ne: true } }),
+        UpgradeKey.countDocuments({ used: true }),
+        Domain.countDocuments({}),
+        Subscription.countDocuments({ status: 'active' })
+      ]);
+
+      const mem = process.memoryUsage();
+      const uptimeSec = process.uptime();
+
+      res.json({
+        totalUsers,
+        totalAliases,
+        totalEmails,
+        activeKeys,
+        usedKeys,
+        totalDomains: totalDomains + 1, // + system default
+        subscriptionsCount,
+        memory: {
+          rssMb: Math.round(mem.rss / 1024 / 1024),
+          heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024)
+        },
+        uptimeSec: Math.floor(uptimeSec),
+        nodeVersion: process.version,
+        defaultDomain: CF_DOMAIN || 'bot.devtushar.uk'
+      });
+    } catch (err: any) {
+      console.error('Dev overview error:', err);
+      res.status(500).json({ error: 'Failed to load telemetry' });
+    }
+  });
+
+  apiRouter.get('/dev/users', requireDevAuth, async (req: any, res) => {
+    try {
+      const search = (req.query.search as string || '').trim().toLowerCase();
+      let query: any = {};
+      if (search) {
+        query = {
+          $or: [
+            { discordId: { $regex: search, $options: 'i' } },
+            { recoveryEmail: { $regex: search, $options: 'i' } }
+          ]
+        };
+      }
+
+      const users = await User.find(query).sort({ _id: -1 }).limit(50).lean();
+      const userIds = users.map((u: any) => u.discordId);
+      const aliases = await Alias.find({ ownerId: { $in: userIds }, status: 'active' }).lean();
+
+      const userList = users.map((u: any) => {
+        const userAliases = aliases.filter((a: any) => a.ownerId === u.discordId);
+        return {
+          discordId: u.discordId,
+          plan: u.plan || 'free',
+          expiresAt: u.expiresAt || null,
+          aliasCount: userAliases.length,
+          recoveryEmail: u.recoveryEmail || null,
+          privacyMode: !!u.privacyMode,
+          managedGuilds: u.managedGuilds || []
+        };
+      });
+
+      res.json({ users: userList });
+    } catch (err: any) {
+      console.error('Dev users error:', err);
+      res.status(500).json({ error: 'Failed to fetch user directory' });
+    }
+  });
+
+  apiRouter.post('/dev/users/:id/plan', requireDevAuth, async (req: any, res) => {
+    try {
+      const userId = req.params.id;
+      const { plan, days } = req.body;
+
+      if (!['free', 'premium', 'supreme'].includes(plan)) {
+        return res.status(400).json({ error: 'Invalid plan tier' });
+      }
+
+      let expiresAt: Date | null = null;
+      if (plan !== 'free') {
+        const durationDays = days && parseInt(days) > 0 ? parseInt(days) : 3650;
+        expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+      }
+
+      await User.updateOne(
+        { discordId: userId },
+        { $set: { plan, expiresAt } },
+        { upsert: true }
+      );
+
+      res.json({ success: true, plan, expiresAt });
+    } catch (err: any) {
+      console.error('Dev set plan error:', err);
+      res.status(500).json({ error: 'Failed to update plan' });
+    }
+  });
+
+  apiRouter.post('/dev/users/:id/reset', requireDevAuth, async (req: any, res) => {
+    try {
+      const userId = req.params.id;
+      await User.updateOne(
+        { discordId: userId },
+        { $set: { plan: 'free', expiresAt: null } }
+      );
+      res.json({ success: true, message: 'User reset to free tier' });
+    } catch (err: any) {
+      console.error('Dev reset user error:', err);
+      res.status(500).json({ error: 'Failed to reset user' });
+    }
+  });
+
+  apiRouter.get('/dev/keys', requireDevAuth, async (req: any, res) => {
+    try {
+      const filter = req.query.filter as string || 'unused';
+      const query = filter === 'all' ? {} : { used: { $ne: true } };
+      const keys = await UpgradeKey.find(query).sort({ _id: -1 }).limit(100).lean();
+      res.json({ keys });
+    } catch (err: any) {
+      console.error('Dev keys error:', err);
+      res.status(500).json({ error: 'Failed to fetch keys' });
+    }
+  });
+
+  apiRouter.post('/dev/keys', requireDevAuth, async (req: any, res) => {
+    try {
+      const { plan, durationDays } = req.body;
+      if (!['premium', 'supreme', 'enterprise'].includes(plan)) {
+        return res.status(400).json({ error: 'Invalid plan tier' });
+      }
+
+      const duration = parseInt(durationDays) || 30;
+      const key = `NEBULA-${plan.toUpperCase().charAt(0)}${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      const newKey = await UpgradeKey.create({
+        code: key,
+        plan,
+        durationDays: duration,
+        used: false,
+        createdAt: new Date()
+      });
+
+      res.json({ success: true, key: newKey });
+    } catch (err: any) {
+      console.error('Dev key generate error:', err);
+      res.status(500).json({ error: 'Failed to generate key' });
+    }
+  });
+
+  apiRouter.delete('/dev/keys/:code', requireDevAuth, async (req: any, res) => {
+    try {
+      const code = req.params.code.trim().toUpperCase();
+      const result = await UpgradeKey.deleteOne({ code });
+      if (result.deletedCount === 0) {
+        return res.status(404).json({ error: 'Key not found' });
+      }
+      res.json({ success: true, message: `Key ${code} deleted` });
+    } catch (err: any) {
+      console.error('Dev delete key error:', err);
+      res.status(500).json({ error: 'Failed to delete key' });
+    }
+  });
+
+  apiRouter.post('/dev/server-plan', requireDevAuth, async (req: any, res) => {
+    try {
+      const { guildId, plan, days } = req.body;
+      if (!guildId || !['free', 'pro', 'enterprise'].includes(plan)) {
+        return res.status(400).json({ error: 'Valid guildId and plan required' });
+      }
+
+      let expiresAt: Date | null = null;
+      if (plan !== 'free') {
+        const durationDays = days && parseInt(days) > 0 ? parseInt(days) : 3650;
+        expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+      }
+
+      await Guild.updateOne(
+        { guildId },
+        { $set: { plan, expiresAt } },
+        { upsert: true }
+      );
+
+      res.json({ success: true, guildId, plan, expiresAt });
+    } catch (err: any) {
+      console.error('Dev server plan error:', err);
+      res.status(500).json({ error: 'Failed to update server plan' });
+    }
+  });
+
+  apiRouter.post('/dev/domains', requireDevAuth, async (req: any, res) => {
+    try {
+      const { domain } = req.body;
+      if (!domain || typeof domain !== 'string') {
+        return res.status(400).json({ error: 'Domain name required' });
+      }
+
+      const cleanDomain = domain.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const existing = await Domain.findOne({ domain: cleanDomain }).lean();
+      if (existing) {
+        return res.status(409).json({ error: `Domain '${cleanDomain}' already exists` });
+      }
+
+      const sysDomain = await Domain.create({
+        userId: req.user.id,
+        domain: cleanDomain,
+        isSystem: true,
+        verified: true,
+        status: 'active',
+        mxConfigured: true,
+        txtConfigured: true,
+        createdAt: new Date()
+      });
+
+      res.json({ success: true, domain: sysDomain });
+    } catch (err: any) {
+      console.error('Dev domain add error:', err);
+      res.status(500).json({ error: 'Failed to add system domain' });
     }
   });
 

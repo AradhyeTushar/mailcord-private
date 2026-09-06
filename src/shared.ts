@@ -77,15 +77,24 @@ export function checkCreationRateLimit(userId: string): boolean {
   return true;
 }
 
-export async function getAlias(name: string) {
-  if (aliasCache.has(name)) return aliasCache.get(name);
-  const record = await Alias.findOne({ name }).lean();
-  if (record) aliasCache.set(name, record);
+export async function getAlias(name: string, domain?: string) {
+  const cacheKey = domain ? `${name}@${domain}` : name;
+  if (aliasCache.has(cacheKey)) return aliasCache.get(cacheKey);
+  
+  let record: any = null;
+  if (domain) {
+    record = await Alias.findOne({ name, domain }).lean();
+  }
+  if (!record) {
+    record = await Alias.findOne({ name }).lean();
+  }
+  if (record) aliasCache.set(cacheKey, record);
   return record;
 }
 
-export function invalidateAliasCache(name: string) {
+export function invalidateAliasCache(name: string, domain?: string) {
   aliasCache.delete(name);
+  if (domain) aliasCache.delete(`${name}@${domain}`);
 }
 
 export async function createCloudflareAlias(fullEmail: string) {

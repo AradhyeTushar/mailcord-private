@@ -36,7 +36,22 @@ import {
   ShieldCheck,
   ExternalLink,
   Lock,
-  Smartphone
+  Smartphone,
+  Globe,
+  Key,
+  Cpu,
+  Layers,
+  RefreshCw,
+  Sliders,
+  Database,
+  Users,
+  CheckCheck,
+  TrendingUp,
+  PlusCircle,
+  HardDrive,
+  CheckSquare,
+  XCircle,
+  ArrowUpRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { io } from 'socket.io-client';
@@ -85,6 +100,42 @@ export default function Dashboard() {
   const [selectedGuildPlan, setSelectedGuildPlan] = useState<string>('free');
   const [isPreparingGateway, setIsPreparingGateway] = useState(false);
   const [processingCancel, setProcessingCancel] = useState(false);
+
+  // --- Multi-Domain State ---
+  const [systemDomains, setSystemDomains] = useState<any[]>([]);
+  const [userDomains, setUserDomains] = useState<any[]>([]);
+  const [newCustomDomain, setNewCustomDomain] = useState('');
+  const [isAddingDomain, setIsAddingDomain] = useState(false);
+  const [verifyingDomainId, setVerifyingDomainId] = useState<string | null>(null);
+  const [domainStatusMessage, setDomainStatusMessage] = useState<string | null>(null);
+  const [domainError, setDomainError] = useState<string | null>(null);
+
+  // --- Web Alias Creation State ---
+  const [showCreateAliasModal, setShowCreateAliasModal] = useState(false);
+  const [newAliasName, setNewAliasName] = useState('');
+  const [selectedAliasDomain, setSelectedAliasDomain] = useState('bot.devtushar.uk');
+  const [isCreatingAlias, setIsCreatingAlias] = useState(false);
+  const [aliasCreateError, setAliasCreateError] = useState<string | null>(null);
+  const [aliasCreateSuccess, setAliasCreateSuccess] = useState(false);
+
+  // --- Developer Control Center State ---
+  const [devOverview, setDevOverview] = useState<any>(null);
+  const [devUsers, setDevUsers] = useState<any[]>([]);
+  const [devUserSearch, setDevUserSearch] = useState('');
+  const [devKeys, setDevKeys] = useState<any[]>([]);
+  const [devKeyFilter, setDevKeyFilter] = useState<'unused' | 'all'>('unused');
+  const [devKeyPlan, setDevKeyPlan] = useState<'premium' | 'supreme' | 'enterprise'>('premium');
+  const [devKeyDuration, setDevKeyDuration] = useState<number>(30);
+  const [devServerGuildId, setDevServerGuildId] = useState('');
+  const [devServerPlan, setDevServerPlan] = useState<'free' | 'pro' | 'enterprise'>('enterprise');
+  const [devServerDays, setDevServerDays] = useState<number>(30);
+  const [devNewSysDomain, setDevNewSysDomain] = useState('');
+  const [devSelectedUser, setDevSelectedUser] = useState<any | null>(null);
+  const [devUserNewPlan, setDevUserNewPlan] = useState('premium');
+  const [devUserNewDays, setDevUserNewDays] = useState<number>(30);
+  const [devLoading, setDevLoading] = useState(false);
+  const [devActionMsg, setDevActionMsg] = useState<string | null>(null);
+  const [devSubTab, setDevSubTab] = useState<'overview' | 'users' | 'keys' | 'domains' | 'servers'>('overview');
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -162,6 +213,284 @@ export default function Dashboard() {
     navigator.clipboard.writeText(cmd);
     setCopiedCommand(cmd);
     setTimeout(() => setCopiedCommand(null), 2000);
+  };
+
+  // --- Domains & Dev API Callbacks ---
+  const fetchDomains = async () => {
+    try {
+      const res = await fetch('/api/domains');
+      if (res.ok) {
+        const data = await res.json();
+        setSystemDomains(data.systemDomains || []);
+        setUserDomains(data.userDomains || []);
+        if (data.systemDomains && data.systemDomains.length > 0) {
+          setSelectedAliasDomain(data.systemDomains[0].domain);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch domains', e);
+    }
+  };
+
+  const fetchDevOverview = async () => {
+    try {
+      setDevLoading(true);
+      const res = await fetch('/api/dev/overview');
+      if (res.ok) {
+        const data = await res.json();
+        setDevOverview(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch dev overview', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  const fetchDevUsers = async () => {
+    try {
+      setDevLoading(true);
+      const res = await fetch('/api/dev/users' + (devUserSearch ? `?search=${encodeURIComponent(devUserSearch)}` : ''));
+      if (res.ok) {
+        const data = await res.json();
+        setDevUsers(data.users || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch dev users', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  const fetchDevKeys = async () => {
+    try {
+      setDevLoading(true);
+      const res = await fetch(`/api/dev/keys?filter=${devKeyFilter}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDevKeys(data.keys || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch dev keys', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'domains' || activeTab === 'aliases') {
+      fetchDomains();
+    }
+    if (activeTab === 'developer') {
+      fetchDevOverview();
+      fetchDevUsers();
+      fetchDevKeys();
+      fetchDomains();
+    }
+  }, [activeTab]);
+
+  const handleCreateAlias = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingAlias(true);
+    setAliasCreateError(null);
+    setAliasCreateSuccess(false);
+    try {
+      const res = await fetch('/api/aliases/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newAliasName, domain: selectedAliasDomain })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAliasCreateSuccess(true);
+        setAliases(prev => [data.alias, ...prev]);
+        setStats(prev => ({ ...prev, activeCount: prev.activeCount + 1 }));
+        setTimeout(() => {
+          setShowCreateAliasModal(false);
+          setNewAliasName('');
+          setAliasCreateSuccess(false);
+        }, 1200);
+      } else {
+        setAliasCreateError(data.error || 'Failed to create alias');
+      }
+    } catch (err: any) {
+      setAliasCreateError(err.message || 'Network error');
+    } finally {
+      setIsCreatingAlias(false);
+    }
+  };
+
+  const handleAddDomain = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomDomain.trim()) return;
+    setIsAddingDomain(true);
+    setDomainError(null);
+    setDomainStatusMessage(null);
+    try {
+      const res = await fetch('/api/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: newCustomDomain })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNewCustomDomain('');
+        setDomainStatusMessage('Domain added! Please configure your DNS MX & TXT records below and verify.');
+        fetchDomains();
+      } else {
+        setDomainError(data.error || 'Failed to add domain');
+      }
+    } catch (err: any) {
+      setDomainError(err.message || 'Network error');
+    } finally {
+      setIsAddingDomain(false);
+    }
+  };
+
+  const handleVerifyDomain = async (id: string) => {
+    setVerifyingDomainId(id);
+    setDomainError(null);
+    setDomainStatusMessage(null);
+    try {
+      const res = await fetch(`/api/domains/${id}/verify`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDomainStatusMessage(data.message);
+        fetchDomains();
+      } else {
+        setDomainError(data.error || data.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      setDomainError(err.message || 'Network error');
+    } finally {
+      setVerifyingDomainId(null);
+    }
+  };
+
+  const handleDeleteDomain = async (id: string) => {
+    if (!confirm('Are you sure you want to remove this domain?')) return;
+    try {
+      const res = await fetch(`/api/domains/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchDomains();
+      }
+    } catch (e) {
+      console.error('Delete domain error', e);
+    }
+  };
+
+  const handleGenerateDevKey = async () => {
+    try {
+      setDevLoading(true);
+      const res = await fetch('/api/dev/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: devKeyPlan, durationDays: devKeyDuration })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDevActionMsg(`Generated key: ${data.key.code}`);
+        fetchDevKeys();
+        setTimeout(() => setDevActionMsg(null), 5000);
+      }
+    } catch (e) {
+      console.error('Gen key error', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  const handleDeleteDevKey = async (code: string) => {
+    if (!confirm(`Revoke key ${code}?`)) return;
+    try {
+      const res = await fetch(`/api/dev/keys/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchDevKeys();
+      }
+    } catch (e) {
+      console.error('Delete key error', e);
+    }
+  };
+
+  const handleUpdateUserPlan = async (userId: string, plan: string, days: number) => {
+    try {
+      setDevLoading(true);
+      const res = await fetch(`/api/dev/users/${userId}/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan, days })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDevActionMsg(`Updated user ${userId} to ${plan.toUpperCase()}`);
+        setDevSelectedUser(null);
+        fetchDevUsers();
+        setTimeout(() => setDevActionMsg(null), 4000);
+      }
+    } catch (e) {
+      console.error('Update plan error', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  const handleResetDevUser = async (userId: string) => {
+    if (!confirm(`Reset user ${userId} to FREE tier?`)) return;
+    try {
+      const res = await fetch(`/api/dev/users/${userId}/reset`, { method: 'POST' });
+      if (res.ok) {
+        setDevActionMsg(`Reset user ${userId} to Free tier.`);
+        fetchDevUsers();
+        setTimeout(() => setDevActionMsg(null), 4000);
+      }
+    } catch (e) {
+      console.error('Reset user error', e);
+    }
+  };
+
+  const handleUpdateServerPlan = async () => {
+    if (!devServerGuildId.trim()) return;
+    try {
+      setDevLoading(true);
+      const res = await fetch('/api/dev/server-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId: devServerGuildId.trim(), plan: devServerPlan, days: devServerDays })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDevActionMsg(`Server ${devServerGuildId} updated to ${devServerPlan.toUpperCase()}`);
+        setDevServerGuildId('');
+        setTimeout(() => setDevActionMsg(null), 4000);
+      }
+    } catch (e) {
+      console.error('Server plan error', e);
+    } finally {
+      setDevLoading(false);
+    }
+  };
+
+  const handleAddSystemDomain = async () => {
+    if (!devNewSysDomain.trim()) return;
+    try {
+      setDevLoading(true);
+      const res = await fetch('/api/dev/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: devNewSysDomain.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDevActionMsg(`System domain ${devNewSysDomain} added!`);
+        setDevNewSysDomain('');
+        fetchDomains();
+        setTimeout(() => setDevActionMsg(null), 4000);
+      }
+    } catch (e) {
+      console.error('System domain error', e);
+    } finally {
+      setDevLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -440,27 +769,39 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
           {[
             { id: 'aliases', icon: Mail, label: 'Email Aliases' },
             { id: 'inbox', icon: Inbox, label: 'Inbox History' },
+            { id: 'domains', icon: Globe, label: 'Custom Domains', badge: (user?.plan === 'supreme' || user?.isDeveloper) ? 'Active' : 'Pro' },
             { id: 'analytics', icon: BarChart3, label: 'Analytics' },
             { id: 'commands', icon: Terminal, label: 'Bot Commands' },
             { id: 'billing', icon: CreditCard, label: 'Billing & Plans' },
             { id: 'settings', icon: Settings, label: 'Account Settings' },
+            ...(user?.isDeveloper ? [{ id: 'developer', icon: ShieldCheck, label: 'Developer Control', badge: 'DEV', isDev: true }] : [])
           ].map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
+                "w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all group",
                 (activeTab === item.id || (item.id === 'commands' && activeTab === 'server'))
-                  ? "bg-indigo-500/10 text-indigo-400 font-semibold" 
-                  : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"
+                  ? (item.isDev ? "bg-purple-500/15 text-purple-300 font-semibold border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)]" : "bg-indigo-500/10 text-indigo-400 font-semibold")
+                  : (item.isDev ? "text-purple-400/80 hover:bg-purple-950/30 hover:text-purple-200" : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200")
               )}
             >
-              <item.icon className="w-4 h-4" />
-              {item.label}
+              <div className="flex items-center gap-3">
+                <item.icon className={cn("w-4 h-4", item.isDev ? "text-purple-400" : "")} />
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider",
+                  item.isDev ? "bg-purple-500 text-white shadow-sm" : (item.badge === 'Active' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-neutral-800 text-neutral-400")
+                )}>
+                  {item.badge}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -506,18 +847,115 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-semibold mb-1">Email Aliases</h1>
                   <p className="text-neutral-400 text-sm">Manage your custom domain email addresses.</p>
                 </div>
+                <button
+                  onClick={() => setShowCreateAliasModal(true)}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20 w-fit"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create Alias</span>
+                </button>
               </div>
+
+              {/* Create Alias Modal */}
+              {showCreateAliasModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95">
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                      <div className="flex items-center gap-2">
+                        <PlusCircle className="w-5 h-5 text-indigo-400" />
+                        <h3 className="font-semibold text-lg text-white">Create New Alias</h3>
+                      </div>
+                      <button
+                        onClick={() => setShowCreateAliasModal(false)}
+                        className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {aliasCreateError && (
+                      <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{aliasCreateError}</span>
+                      </div>
+                    )}
+
+                    {aliasCreateSuccess && (
+                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>Alias created successfully!</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleCreateAlias} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-400 mb-1.5">Alias Prefix</label>
+                        <input
+                          type="text"
+                          required
+                          value={newAliasName}
+                          onChange={(e) => setNewAliasName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                          placeholder="e.g. shopping, contact, alex"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-neutral-400 mb-1.5">Select Domain</label>
+                        <select
+                          value={selectedAliasDomain}
+                          onChange={(e) => setSelectedAliasDomain(e.target.value)}
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                        >
+                          {systemDomains.map((d: any) => (
+                            <option key={d.domain} value={d.domain}>
+                              @{d.domain} (System Default)
+                            </option>
+                          ))}
+                          {userDomains.filter((d: any) => d.verified).map((d: any) => (
+                            <option key={d.domain} value={d.domain}>
+                              @{d.domain} (Your Custom Domain)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 text-xs text-neutral-400">
+                        Preview: <span className="text-indigo-300 font-mono font-medium">{newAliasName || 'yourname'}@{selectedAliasDomain}</span>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateAliasModal(false)}
+                          className="px-4 py-2 rounded-xl text-neutral-400 hover:text-white text-sm font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isCreatingAlias || !newAliasName}
+                          className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20"
+                        >
+                          {isCreatingAlias ? 'Creating...' : 'Create Address'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-neutral-950/50 text-neutral-400 border-b border-neutral-800">
                     <tr>
                       <th className="px-6 py-4 font-medium">Alias</th>
+                      <th className="px-6 py-4 font-medium">Domain</th>
                       <th className="px-6 py-4 font-medium">Emails Received</th>
                       <th className="px-6 py-4 font-medium">Created</th>
                     </tr>
@@ -525,39 +963,51 @@ export default function Dashboard() {
                   <tbody className="divide-y divide-neutral-800">
                     {aliases.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="px-6 py-12 text-center text-neutral-500">
-                          No aliases found. Create one using the Discord bot!
+                        <td colSpan={4} className="px-6 py-12 text-center text-neutral-500">
+                          No aliases found. Click "Create Alias" above or use the Discord bot!
                         </td>
                       </tr>
                     )}
-                    {aliases.map((alias) => (
-                      <tr key={alias._id} className="hover:bg-neutral-800/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-neutral-200">{alias.name}@bot.devtushar.uk</span>
-                            <button 
-                              onClick={() => handleCopy(`${alias.name}@bot.devtushar.uk`, alias._id)}
-                              className="text-neutral-500 hover:text-neutral-300 transition-colors"
-                              title="Copy"
-                            >
-                              {copiedId === alias._id ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                            </button>
-                            <button
-                              onClick={() => { setAliasFilter(alias.name); setActiveTab('inbox'); }}
-                              className="px-2 py-0.5 bg-neutral-800 hover:bg-indigo-600/20 text-neutral-400 hover:text-indigo-300 rounded text-xs transition-colors flex items-center gap-1 border border-neutral-700/60"
-                              title={`Open Inbox for ${alias.name}`}
-                            >
-                              <Inbox className="w-3.5 h-3.5" />
-                              <span>Inbox</span>
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-neutral-400">
-                          {alias.emailsReceived || 0}
-                        </td>
-                        <td className="px-6 py-4 text-neutral-400">{new Date(alias.createdAt).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
+                    {aliases.map((alias) => {
+                      const domainName = alias.domain || 'bot.devtushar.uk';
+                      const fullEmail = `${alias.name}@${domainName}`;
+                      return (
+                        <tr key={alias._id} className="hover:bg-neutral-800/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-neutral-200">{fullEmail}</span>
+                              <button 
+                                onClick={() => handleCopy(fullEmail, alias._id)}
+                                className="text-neutral-500 hover:text-neutral-300 transition-colors"
+                                title="Copy"
+                              >
+                                {copiedId === alias._id ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                              </button>
+                              <button
+                                onClick={() => { setAliasFilter(alias.name); setActiveTab('inbox'); }}
+                                className="px-2 py-0.5 bg-neutral-800 hover:bg-indigo-600/20 text-neutral-400 hover:text-indigo-300 rounded text-xs transition-colors flex items-center gap-1 border border-neutral-700/60"
+                                title={`Open Inbox for ${alias.name}`}
+                              >
+                                <Inbox className="w-3.5 h-3.5" />
+                                <span>Inbox</span>
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "text-xs px-2 py-0.5 rounded font-mono border",
+                              domainName === 'bot.devtushar.uk' ? "bg-neutral-800/60 text-neutral-400 border-neutral-700" : "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+                            )}>
+                              @{domainName}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-neutral-400">
+                            {alias.emailsReceived || 0}
+                          </td>
+                          <td className="px-6 py-4 text-neutral-400">{new Date(alias.createdAt).toLocaleDateString()}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1574,6 +2024,717 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {/* Custom Domains Tab */}
+          {activeTab === 'domains' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8 max-w-4xl"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold mb-1 flex items-center gap-2.5">
+                    <Globe className="w-6 h-6 text-indigo-400" />
+                    Custom Domains
+                  </h1>
+                  <p className="text-neutral-400 text-sm">
+                    Connect your own custom domains to receive email on branded addresses like <span className="text-indigo-300 font-mono">contact@yourdomain.com</span>.
+                  </p>
+                </div>
+              </div>
+
+              {domainStatusMessage && (
+                <div className="p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-sm flex items-center gap-3">
+                  <CheckCircle2 className="w-5 h-5 shrink-0 text-indigo-400" />
+                  <span>{domainStatusMessage}</span>
+                </div>
+              )}
+
+              {domainError && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 shrink-0" />
+                  <span>{domainError}</span>
+                </div>
+              )}
+
+              {/* Add Domain Card */}
+              <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4">
+                <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                  <PlusCircle className="w-4 h-4 text-indigo-400" />
+                  Link a New Domain
+                </h3>
+                <p className="text-xs text-neutral-400">
+                  Enter your root domain or subdomain. Supreme tier or Enterprise tier required.
+                </p>
+
+                <form onSubmit={handleAddDomain} className="flex flex-col sm:flex-row items-center gap-3">
+                  <div className="relative flex-1 w-full">
+                    <Globe className="w-4 h-4 absolute left-3.5 top-3.5 text-neutral-500" />
+                    <input
+                      type="text"
+                      required
+                      value={newCustomDomain}
+                      onChange={(e) => setNewCustomDomain(e.target.value)}
+                      placeholder="e.g. mail.mybrand.com or mycompany.org"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isAddingDomain || !newCustomDomain.trim()}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-lg shadow-indigo-600/20 whitespace-nowrap"
+                  >
+                    {isAddingDomain ? 'Registering...' : 'Add Domain'}
+                  </button>
+                </form>
+              </div>
+
+              {/* DNS Instructions Card */}
+              <div className="p-6 rounded-2xl bg-neutral-900/60 border border-neutral-800 space-y-4">
+                <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-indigo-400" />
+                  DNS Setup Instructions
+                </h3>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Log into your DNS provider (Cloudflare, Namecheap, GoDaddy, Hostinger, Route53) and add the following records:
+                </p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-neutral-950 text-neutral-400 border-b border-neutral-800">
+                      <tr>
+                        <th className="p-3">Type</th>
+                        <th className="p-3">Name / Host</th>
+                        <th className="p-3">Value / Target</th>
+                        <th className="p-3">Priority</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-800/60 text-neutral-300">
+                      <tr>
+                        <td className="p-3 font-semibold text-indigo-400">MX</td>
+                        <td className="p-3">@ (or subdomain)</td>
+                        <td className="p-3 select-all">isaac.mx.cloudflare.net</td>
+                        <td className="p-3">10</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-indigo-400">MX</td>
+                        <td className="p-3">@ (or subdomain)</td>
+                        <td className="p-3 select-all">linda.mx.cloudflare.net</td>
+                        <td className="p-3">20</td>
+                      </tr>
+                      <tr>
+                        <td className="p-3 font-semibold text-indigo-400">TXT</td>
+                        <td className="p-3">@ (or subdomain)</td>
+                        <td className="p-3 select-all font-mono">v=spf1 include:_spf.mx.cloudflare.net ~all</td>
+                        <td className="p-3 text-neutral-600">-</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Registered Domains Table */}
+              <div className="space-y-4">
+                <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-indigo-400" />
+                  Configured Domains
+                </h3>
+
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-neutral-950/50 text-neutral-400 border-b border-neutral-800">
+                      <tr>
+                        <th className="px-6 py-4 font-medium">Domain Name</th>
+                        <th className="px-6 py-4 font-medium">Type</th>
+                        <th className="px-6 py-4 font-medium">Status</th>
+                        <th className="px-6 py-4 font-medium text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-800">
+                      {/* System Domains */}
+                      {systemDomains.map((sys: any) => (
+                        <tr key={sys.domain} className="hover:bg-neutral-800/40 transition-colors">
+                          <td className="px-6 py-4 font-mono font-medium text-white flex items-center gap-2">
+                            <span>@{sys.domain}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">System Default</span>
+                          </td>
+                          <td className="px-6 py-4 text-neutral-400 text-xs">Shared Infrastructure</td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Active & Routed
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right text-xs text-neutral-500">Global</td>
+                        </tr>
+                      ))}
+
+                      {/* Custom User Domains */}
+                      {userDomains.length === 0 && systemDomains.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-12 text-center text-neutral-500 text-sm">
+                            No custom domains configured yet.
+                          </td>
+                        </tr>
+                      )}
+
+                      {userDomains.map((domain: any) => (
+                        <tr key={domain._id} className="hover:bg-neutral-800/40 transition-colors">
+                          <td className="px-6 py-4 font-mono font-medium text-white">
+                            @{domain.domain}
+                          </td>
+                          <td className="px-6 py-4 text-neutral-400 text-xs">Custom Domain</td>
+                          <td className="px-6 py-4">
+                            {domain.verified ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Verified
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <Clock className="w-3.5 h-3.5" />
+                                Pending DNS
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {!domain.verified && (
+                                <button
+                                  onClick={() => handleVerifyDomain(domain._id)}
+                                  disabled={verifyingDomainId === domain._id}
+                                  className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  {verifyingDomainId === domain._id ? 'Verifying...' : 'Verify DNS'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteDomain(domain._id)}
+                                className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                title="Delete domain"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Master Developer Control Center Tab */}
+          {activeTab === 'developer' && user?.isDeveloper && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {/* Header Banner */}
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-purple-950/60 via-indigo-950/40 to-neutral-900 border border-purple-500/30 shadow-[0_0_30px_rgba(168,85,247,0.1)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      MASTER DEVELOPER CONSOLE
+                    </span>
+                  </div>
+                  <h1 className="text-2xl font-bold text-white tracking-tight">Nebula Engine Intelligence & Control</h1>
+                  <p className="text-xs text-neutral-400">
+                    Real-time telemetry, user subscription overrides, instant key generation, and cluster routing.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => { fetchDevOverview(); fetchDevUsers(); fetchDevKeys(); fetchDomains(); }}
+                    disabled={devLoading}
+                    className="px-4 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", devLoading ? "animate-spin" : "")} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {devActionMsg && (
+                <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 text-sm flex items-center gap-3 animate-in fade-in">
+                  <CheckCircle2 className="w-5 h-5 shrink-0 text-purple-400" />
+                  <span>{devActionMsg}</span>
+                </div>
+              )}
+
+              {/* Telemetry Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Total Users</span>
+                  </div>
+                  <div className="text-2xl font-bold text-white">{devOverview?.totalUsers ?? '...'}</div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Active Aliases</span>
+                  </div>
+                  <div className="text-2xl font-bold text-white">{devOverview?.totalAliases ?? '...'}</div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Inbox className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Inbound Mails</span>
+                  </div>
+                  <div className="text-2xl font-bold text-white">{devOverview?.totalEmails ?? '...'}</div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Unused Keys</span>
+                  </div>
+                  <div className="text-2xl font-bold text-purple-300">{devOverview?.activeKeys ?? '...'}</div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Domains</span>
+                  </div>
+                  <div className="text-2xl font-bold text-white">{devOverview?.totalDomains ?? '...'}</div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-1">
+                  <div className="text-neutral-400 text-xs flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>RAM Heap</span>
+                  </div>
+                  <div className="text-2xl font-bold text-white">{devOverview?.memory?.heapUsedMb ? `${devOverview.memory.heapUsedMb} MB` : '...'}</div>
+                </div>
+              </div>
+
+              {/* Sub-Navigation Tabs */}
+              <div className="flex items-center gap-2 border-b border-neutral-800 pb-2 overflow-x-auto">
+                {[
+                  { id: 'overview', label: 'User Directory & Tiers', icon: Users },
+                  { id: 'keys', label: 'License Keys Minting', icon: Key },
+                  { id: 'domains', label: 'Global Domains', icon: Globe },
+                  { id: 'servers', label: 'Server Subscriptions', icon: Server }
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setDevSubTab(t.id as any)}
+                    className={cn(
+                      "px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all whitespace-nowrap",
+                      devSubTab === t.id
+                        ? "bg-purple-600 text-white shadow-lg shadow-purple-600/20"
+                        : "text-neutral-400 hover:bg-neutral-900 hover:text-white"
+                    )}
+                  >
+                    <t.icon className="w-3.5 h-3.5" />
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Sub Tab: Users */}
+              {devSubTab === 'overview' && (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="relative flex-1 max-w-md">
+                      <Search className="w-4 h-4 absolute left-3.5 top-3 text-neutral-500" />
+                      <input
+                        type="text"
+                        value={devUserSearch}
+                        onChange={(e) => setDevUserSearch(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && fetchDevUsers()}
+                        placeholder="Search by Discord ID or Recovery Email..."
+                        className="w-full pl-10 pr-4 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-white text-xs focus:outline-none focus:border-purple-500 font-mono"
+                      />
+                    </div>
+                    <button
+                      onClick={() => fetchDevUsers()}
+                      className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl text-xs font-medium border border-neutral-800 flex items-center gap-2"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>Search</span>
+                    </button>
+                  </div>
+
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-950/70 text-neutral-400 border-b border-neutral-800">
+                        <tr>
+                          <th className="px-5 py-3.5 font-medium">Discord ID</th>
+                          <th className="px-5 py-3.5 font-medium">Plan Tier</th>
+                          <th className="px-5 py-3.5 font-medium">Expiration</th>
+                          <th className="px-5 py-3.5 font-medium">Aliases</th>
+                          <th className="px-5 py-3.5 font-medium text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-800">
+                        {devUsers.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-5 py-8 text-center text-neutral-500">
+                              No users found.
+                            </td>
+                          </tr>
+                        )}
+                        {devUsers.map((u: any) => (
+                          <tr key={u.discordId} className="hover:bg-neutral-800/40 transition-colors">
+                            <td className="px-5 py-3.5 font-mono text-neutral-200">
+                              <span className="font-semibold text-white">{u.discordId}</span>
+                              {u.recoveryEmail && <span className="block text-[10px] text-neutral-500">{u.recoveryEmail}</span>}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded font-bold uppercase text-[10px] border",
+                                u.plan === 'supreme' ? "bg-purple-500/20 text-purple-300 border-purple-500/40" :
+                                u.plan === 'premium' ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40" :
+                                "bg-neutral-800 text-neutral-400 border-neutral-700"
+                              )}>
+                                {u.plan}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-neutral-400">
+                              {u.expiresAt ? new Date(u.expiresAt).toLocaleDateString() : 'Indefinite / Free'}
+                            </td>
+                            <td className="px-5 py-3.5 text-neutral-300 font-semibold font-mono">
+                              {u.aliasCount} active
+                            </td>
+                            <td className="px-5 py-3.5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setDevSelectedUser(u);
+                                    setDevUserNewPlan(u.plan === 'free' ? 'supreme' : u.plan);
+                                  }}
+                                  className="px-2.5 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-[11px] font-semibold transition-colors"
+                                >
+                                  Modify Tier
+                                </button>
+                                <button
+                                  onClick={() => handleResetDevUser(u.discordId)}
+                                  className="px-2.5 py-1 bg-neutral-800 hover:bg-red-500/20 text-neutral-400 hover:text-red-300 rounded-lg text-[11px] font-medium transition-colors"
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Modal for Modifying User Plan */}
+                  {devSelectedUser && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+                      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+                        <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+                          <h3 className="font-semibold text-white text-sm">Override Plan for {devSelectedUser.discordId}</h3>
+                          <button onClick={() => setDevSelectedUser(null)} className="text-neutral-400 hover:text-white">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1 font-medium">Select Plan Tier</label>
+                            <select
+                              value={devUserNewPlan}
+                              onChange={(e) => setDevUserNewPlan(e.target.value)}
+                              className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs font-semibold focus:outline-none focus:border-purple-500"
+                            >
+                              <option value="free">Free Tier</option>
+                              <option value="premium">Premium Tier</option>
+                              <option value="supreme">Supreme Tier</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs text-neutral-400 mb-1 font-medium">Duration (Days)</label>
+                            <input
+                              type="number"
+                              value={devUserNewDays}
+                              onChange={(e) => setDevUserNewDays(parseInt(e.target.value) || 30)}
+                              className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2">
+                          <button
+                            onClick={() => setDevSelectedUser(null)}
+                            className="px-3 py-1.5 rounded-xl text-neutral-400 hover:text-white text-xs font-medium"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleUpdateUserPlan(devSelectedUser.discordId, devUserNewPlan, devUserNewDays)}
+                            className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold"
+                          >
+                            Apply Plan
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Sub Tab: Keys */}
+              {devSubTab === 'keys' && (
+                <div className="space-y-6">
+                  {/* Mint Card */}
+                  <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4">
+                    <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                      <PlusCircle className="w-4 h-4 text-purple-400" />
+                      Mint License Key
+                    </h3>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Plan Tier</label>
+                        <select
+                          value={devKeyPlan}
+                          onChange={(e) => setDevKeyPlan(e.target.value as any)}
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs font-semibold focus:outline-none focus:border-purple-500"
+                        >
+                          <option value="premium">Premium Tier (Personal)</option>
+                          <option value="supreme">Supreme Tier (Pro Identity)</option>
+                          <option value="enterprise">Enterprise Tier (Server-Wide)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1.5 font-medium">Duration (Days)</label>
+                        <input
+                          type="number"
+                          value={devKeyDuration}
+                          onChange={(e) => setDevKeyDuration(parseInt(e.target.value) || 30)}
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <button
+                          onClick={handleGenerateDevKey}
+                          disabled={devLoading}
+                          className="w-full px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Key className="w-4 h-4" />
+                          <span>Mint License Key</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Keys Table */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-sm text-white">Generated Keys Vault</h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setDevKeyFilter('unused'); }}
+                          className={cn(
+                            "px-3 py-1 rounded-lg text-xs font-medium transition-colors",
+                            devKeyFilter === 'unused' ? "bg-purple-600 text-white" : "bg-neutral-900 text-neutral-400 hover:text-white"
+                          )}
+                        >
+                          Unused Only
+                        </button>
+                        <button
+                          onClick={() => { setDevKeyFilter('all'); }}
+                          className={cn(
+                            "px-3 py-1 rounded-lg text-xs font-medium transition-colors",
+                            devKeyFilter === 'all' ? "bg-purple-600 text-white" : "bg-neutral-900 text-neutral-400 hover:text-white"
+                          )}
+                        >
+                          All Keys
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-neutral-950/70 text-neutral-400 border-b border-neutral-800">
+                          <tr>
+                            <th className="px-5 py-3.5 font-medium">License Key</th>
+                            <th className="px-5 py-3.5 font-medium">Plan</th>
+                            <th className="px-5 py-3.5 font-medium">Days</th>
+                            <th className="px-5 py-3.5 font-medium">Status</th>
+                            <th className="px-5 py-3.5 font-medium text-right">Revoke</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-800 font-mono">
+                          {devKeys.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-8 text-center text-neutral-500 font-sans">
+                                No keys found matching filter.
+                              </td>
+                            </tr>
+                          )}
+                          {devKeys.map((k: any) => (
+                            <tr key={k.code} className="hover:bg-neutral-800/40 transition-colors">
+                              <td className="px-5 py-3.5 font-bold text-white flex items-center gap-2">
+                                <span>{k.code}</span>
+                                <button
+                                  onClick={() => handleCopy(k.code, k.code)}
+                                  className="text-neutral-500 hover:text-purple-300"
+                                  title="Copy key"
+                                >
+                                  {copiedId === k.code ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                              </td>
+                              <td className="px-5 py-3.5 uppercase font-sans text-neutral-300 font-semibold">
+                                {k.plan}
+                              </td>
+                              <td className="px-5 py-3.5 text-neutral-400">
+                                {k.durationDays || 30}d
+                              </td>
+                              <td className="px-5 py-3.5 font-sans">
+                                {k.used ? (
+                                  <span className="text-neutral-500">Used by {k.usedBy}</span>
+                                ) : (
+                                  <span className="text-emerald-400 font-medium">Active / Unredeemed</span>
+                                )}
+                              </td>
+                              <td className="px-5 py-3.5 text-right font-sans">
+                                <button
+                                  onClick={() => handleDeleteDevKey(k.code)}
+                                  className="p-1 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                                  title="Delete key"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub Tab: Global Domains */}
+              {devSubTab === 'domains' && (
+                <div className="space-y-6">
+                  <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4">
+                    <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                      <PlusCircle className="w-4 h-4 text-purple-400" />
+                      Add Global System Domain
+                    </h3>
+                    <p className="text-xs text-neutral-400">
+                      System domains become available in the alias creation dropdown for all server members and users.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                      <input
+                        type="text"
+                        value={devNewSysDomain}
+                        onChange={(e) => setDevNewSysDomain(e.target.value)}
+                        placeholder="e.g. mail.devtushar.uk"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs font-mono focus:outline-none focus:border-purple-500"
+                      />
+                      <button
+                        onClick={handleAddSystemDomain}
+                        disabled={devLoading || !devNewSysDomain.trim()}
+                        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold whitespace-nowrap shadow-lg shadow-purple-600/20"
+                      >
+                        Register Global Domain
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-950/70 text-neutral-400 border-b border-neutral-800">
+                        <tr>
+                          <th className="px-5 py-3.5 font-medium">Domain</th>
+                          <th className="px-5 py-3.5 font-medium">Type</th>
+                          <th className="px-5 py-3.5 font-medium">Routing Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-800 font-mono">
+                        {systemDomains.map((d: any) => (
+                          <tr key={d.domain} className="hover:bg-neutral-800/40 transition-colors">
+                            <td className="px-5 py-3.5 font-bold text-white">@{d.domain}</td>
+                            <td className="px-5 py-3.5 text-neutral-400 font-sans">Global System Domain</td>
+                            <td className="px-5 py-3.5 text-emerald-400 font-sans font-medium">Active & Enabled</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub Tab: Server Subscriptions */}
+              {devSubTab === 'servers' && (
+                <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4 max-w-xl">
+                  <h3 className="font-semibold text-base text-white flex items-center gap-2">
+                    <Server className="w-4 h-4 text-purple-400" />
+                    Server-Wide Plan Override
+                  </h3>
+                  <p className="text-xs text-neutral-400">
+                    Directly elevate any Discord Guild to Pro or Enterprise tier.
+                  </p>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1 font-medium">Discord Server / Guild ID</label>
+                      <input
+                        type="text"
+                        value={devServerGuildId}
+                        onChange={(e) => setDevServerGuildId(e.target.value)}
+                        placeholder="e.g. 879413373261983776"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs font-mono focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1 font-medium">Server Plan Tier</label>
+                      <select
+                        value={devServerPlan}
+                        onChange={(e) => setDevServerPlan(e.target.value as any)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs font-semibold focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="free">Free Server</option>
+                        <option value="pro">Pro Server</option>
+                        <option value="enterprise">Enterprise Server</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-neutral-400 mb-1 font-medium">Duration (Days)</label>
+                      <input
+                        type="number"
+                        value={devServerDays}
+                        onChange={(e) => setDevServerDays(parseInt(e.target.value) || 30)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-white text-xs focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+
+                    <button
+                      onClick={handleUpdateServerPlan}
+                      disabled={devLoading || !devServerGuildId.trim()}
+                      className="w-full px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold transition-all shadow-lg shadow-purple-600/20"
+                    >
+                      Update Server Plan
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </div>

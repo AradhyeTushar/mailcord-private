@@ -85,13 +85,13 @@ async function analyzeEmail(subject: string, body: string) {
 
 async function processEmailPipeline(data: any) {
   const { to, from, raw, headers } = data;
-  const aliasName = to.split('@')[0].toLowerCase();
+  const [aliasName, domainPart] = to.toLowerCase().split('@');
   
   try {
-    const record = await getAlias(aliasName);
+    const record = await getAlias(aliasName, domainPart);
 
     if (record && record.status === 'active') {
-        await Alias.updateOne({ name: aliasName }, { $inc: { emailsReceived: 1 } });
+        await Alias.updateOne({ _id: record._id }, { $inc: { emailsReceived: 1 } });
         const userRecord: any = await User.findOne({ discordId: record.ownerId }).lean();
         
         if (userRecord) {
