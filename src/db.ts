@@ -150,12 +150,39 @@ function getModel(name: string, schema: any) {
     return lite;
   }
 
-  return new Proxy({}, {
+  const dummyTarget = function (this: any, ...args: any[]) {
+    if (isMongooseConnected && mongoose.connection.readyState === 1 && mModel) {
+      return new mModel(...args);
+    }
+    return (lite as any)(...args);
+  };
+
+  return new Proxy(dummyTarget, {
     get(_, prop) {
-      if (isMongooseConnected && mongoose.connection.readyState === 1) {
-        return mModel[prop];
+      if (isMongooseConnected && mongoose.connection.readyState === 1 && mModel) {
+        const val = mModel[prop];
+        if (typeof val === 'function') {
+          return val.bind(mModel);
+        }
+        return val;
       }
-      return (lite as any)[prop];
+      const val = (lite as any)[prop];
+      if (typeof val === 'function') {
+        return val.bind(lite);
+      }
+      return val;
+    },
+    construct(_, args) {
+      if (isMongooseConnected && mongoose.connection.readyState === 1 && mModel) {
+        return new mModel(...args);
+      }
+      return (lite as any)(...args);
+    },
+    apply(_, thisArg, args) {
+      if (isMongooseConnected && mongoose.connection.readyState === 1 && mModel) {
+        return new mModel(...args);
+      }
+      return (lite as any)(...args);
     }
   });
 }
