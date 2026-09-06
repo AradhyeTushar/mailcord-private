@@ -272,14 +272,97 @@ export const BOT_COMMANDS: BotCommand[] = [
     example: '!restore'
   },
   {
-    name: '!redeem <code>',
+    name: '!redeem <code> [@user]',
     category: 'dev',
     role: 'Everyone',
-    shortcuts: [],
-    description: 'Redeems an enterprise or pro license key to activate premium limits for your account or server.',
-    example: '!redeem NEBULA-PRO-2026',
+    shortcuts: ['/redeem code:<code> [user:@user]'],
+    description: 'Redeems an upgrade license code to elevate your account, server, or another user (Dev/Admin only for targeting others).',
+    example: '!redeem NEBULA-PXXXX-XXXX @alex',
     params: [
-      { name: '<code>', desc: 'The alphanumeric license key string' }
+      { name: '<code>', desc: 'The upgrade key code string' },
+      { name: '[@user]', desc: 'Optional: Target user to receive the upgrade (Developer or Admin only)' }
+    ]
+  },
+  {
+    name: '!dev setplan <@user> <tier> [days]',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev setplan user:@user plan:<tier> [days:days]'],
+    description: 'Directly modifies a user\'s subscription plan tier and duration without requiring a redeem key.',
+    example: '!dev setplan @alex supreme 60',
+    params: [
+      { name: '<@user>', desc: 'Mention or Discord User ID of the target user' },
+      { name: '<tier>', desc: 'Target subscription tier: free, premium, or supreme' },
+      { name: '[days]', desc: 'Optional duration in days (default: 30)' }
+    ]
+  },
+  {
+    name: '!dev setserver [guild_id] <tier> [days]',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev setserver plan:<tier> [guild_id:id] [days:days]'],
+    description: 'Directly updates the server-wide subscription plan and perks for a Discord guild.',
+    example: '!dev setserver enterprise 365',
+    params: [
+      { name: '[guild_id]', desc: 'Optional Discord Guild ID (defaults to current server)' },
+      { name: '<tier>', desc: 'Server tier: free, pro, or enterprise' },
+      { name: '[days]', desc: 'Optional duration in days (default: 30)' }
+    ]
+  },
+  {
+    name: '!dev userinfo <@user>',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev userinfo user:@user'],
+    description: 'Displays comprehensive database diagnostics, active aliases, forwarders, plan status, and expiry countdown for any user.',
+    example: '!dev userinfo @alex',
+    params: [
+      { name: '<@user>', desc: 'Target Discord user mention or ID' }
+    ]
+  },
+  {
+    name: '!dev resetuser <@user>',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev resetuser user:@user'],
+    description: 'Instantly resets a user back to the Free plan tier.',
+    example: '!dev resetuser @alex',
+    params: [
+      { name: '<@user>', desc: 'Target Discord user mention or ID' }
+    ]
+  },
+  {
+    name: '!dev genkey <tier> [days]',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['!devkey <tier> [days]', '/dev genkey plan:<tier> [duration:days]', '/devkey plan:<tier> [duration:days]'],
+    description: 'Generates a fresh single-use license key with custom duration that can be redeemed by users.',
+    example: '!dev genkey supreme 30',
+    params: [
+      { name: '<tier>', desc: 'License plan tier: premium, supreme, or enterprise' },
+      { name: '[days]', desc: 'Duration in days (default: 30)' }
+    ]
+  },
+  {
+    name: '!dev keys [status]',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev listkeys [status:unused|all]'],
+    description: 'Lists recently generated upgrade license keys with active/used status.',
+    example: '!dev keys unused',
+    params: [
+      { name: '[status]', desc: 'Filter by "unused" (default) or "all"' }
+    ]
+  },
+  {
+    name: '!dev delkey <code>',
+    category: 'dev',
+    role: 'Developer',
+    shortcuts: ['/dev deletekey code:<code>'],
+    description: 'Revokes and permanently deletes an unused upgrade license code from the database.',
+    example: '!dev delkey NEBULA-PXXXX-XXXX',
+    params: [
+      { name: '<code>', desc: 'The exact key code to delete' }
     ]
   }
 ];
